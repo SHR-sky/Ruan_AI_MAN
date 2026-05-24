@@ -111,7 +111,7 @@ docker-compose up -d
 │   ├── scenic_guide_esp32.ino  # 完整 Arduino 示例
 │   └── API.md            # 设备 API 文档
 ├── docker-compose.yml    # 容器编排
-└── 开题报告_景区导览服务AI数字人.md
+└── 项目文档/                  # 开题报告、项目介绍等
 ```
 
 ## 设备 API
