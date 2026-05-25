@@ -260,11 +260,19 @@ class TTSService:
         return {"voice_type": v, **cfg}
 
     def get_status(self) -> dict:
+        import torch
+        device = self.__class__._shared_device or "unknown"
+        gpu_name = ""
+        if device == "cuda" and torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            vram = torch.cuda.get_device_properties(0).total_mem // (1024**3)
+            gpu_name = f"{gpu_name} ({vram}GB VRAM)"
         return {
             "engine": "ChatTTS",
             "loaded": self.__class__._shared_chat is not None,
             "requested_device": settings.TTS_DEVICE,
-            "runtime_device": self.__class__._shared_device,
+            "runtime_device": device,
+            "gpu_name": gpu_name,
             "fallback_enabled": False,
             "last_error": self.__class__._shared_load_error,
             "cache_dir": str(self.cache_dir),

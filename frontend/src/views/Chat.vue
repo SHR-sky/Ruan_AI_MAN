@@ -20,6 +20,7 @@ const autoplayBlocked = ref(false)
 const audioError = ref('')
 const audioRef = ref<HTMLAudioElement | null>(null)
 const objectAudioUrl = ref('')
+const ttsDevice = ref('')
 let speechRunId = 0
 
 onMounted(async () => {
@@ -41,6 +42,7 @@ async function loadIntro() {
     introType.value = res.data.type
     introText.value = res.data.intro_text || res.data.full_text || ''
     audioUrl.value = res.data.audio_url || '/api/v1/demo/intro/audio?voice_type=female'
+    ttsDevice.value = res.data.tts_status?.gpu_name || res.data.tts_status?.runtime_device || ''
     messages.value.push({
       role: 'assistant',
       content: `${introText.value}`,
@@ -220,6 +222,7 @@ function handleVoiceResult(text: string) {
         <h1>景区智能导览语音 Demo</h1>
       </div>
       <div class="header-actions" v-if="introText">
+        <span v-if="ttsDevice" class="device-badge" :class="{ cuda: ttsDevice.includes('NVIDIA') || ttsDevice.includes('VRAM') }">{{ ttsDevice }}</span>
         <button class="play-btn" :class="{ playing: isPlaying }" :disabled="audioLoading" @click="isPlaying ? stopAudio() : playIntro(false)">
           {{ audioLoading ? '生成语音中...' : isPlaying ? '停止播放' : '播放导览' }}
         </button>
@@ -311,6 +314,24 @@ function handleVoiceResult(text: string) {
 
 .play-btn.playing {
   background: #b64632;
+}
+
+.device-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #e8e8e8;
+  color: #555;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+.device-badge.cuda {
+  background: #76b900;
+  color: #fff;
 }
 
 .chat-main {
