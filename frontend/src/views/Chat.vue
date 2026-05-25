@@ -114,8 +114,8 @@ async function playIntro(fromAutoplay = false) {
 }
 
 async function playAssistantAnswer(text: string) {
-  const chunks = splitSpeechChunks(text)
-  if (!chunks.length) return
+  const speechText = normalizeSpeechText(text)
+  if (!speechText) return
 
   try {
     audioError.value = ''
@@ -123,22 +123,18 @@ async function playAssistantAnswer(text: string) {
       stopAudio()
     }
     const runId = ++speechRunId
-
-    for (const chunk of chunks) {
-      if (runId !== speechRunId) return
-      audioLoading.value = true
-      const res = await api.post(
-        '/tts/synthesize-file',
-        { text: chunk, voice_type: 'female' },
-        { responseType: 'blob' },
-      )
-      if (runId !== speechRunId) return
-      if (objectAudioUrl.value) {
-        URL.revokeObjectURL(objectAudioUrl.value)
-      }
-      objectAudioUrl.value = URL.createObjectURL(res.data)
-      await playAudioAndWait(objectAudioUrl.value, runId)
+    audioLoading.value = true
+    const res = await api.post(
+      '/tts/synthesize-file',
+      { text: speechText, voice_type: 'female' },
+      { responseType: 'blob' },
+    )
+    if (runId !== speechRunId) return
+    if (objectAudioUrl.value) {
+      URL.revokeObjectURL(objectAudioUrl.value)
     }
+    objectAudioUrl.value = URL.createObjectURL(res.data)
+    await playAudioAndWait(objectAudioUrl.value, runId)
   } catch {
     isPlaying.value = false
     audioLoading.value = false
@@ -146,23 +142,8 @@ async function playAssistantAnswer(text: string) {
   }
 }
 
-function splitSpeechChunks(text: string) {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (!normalized) return []
-  const pieces = normalized.match(/[^。！？!?；;]+[。！？!?；;]?/g) ?? [normalized]
-  const chunks: string[] = []
-  let current = ''
-
-  for (const piece of pieces) {
-    if ((current + piece).length > 130 && current) {
-      chunks.push(current)
-      current = piece
-    } else {
-      current += piece
-    }
-  }
-  if (current) chunks.push(current)
-  return chunks
+function normalizeSpeechText(text: string) {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 async function playAudioAndWait(source: string, runId: number) {

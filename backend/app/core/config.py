@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     ASR_MODEL: str = "whisper-1"
 
     # TTS 配置
-    TTS_VOICE: str = "default"
+    TTS_VOICE: str = "female"
     TTS_DEVICE: str = "auto"
     TTS_LANGUAGE: str = "ZH"
     TTS_CACHE_ENABLED: bool = True

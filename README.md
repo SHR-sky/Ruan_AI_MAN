@@ -24,7 +24,7 @@
 | Chat Service | WebSocket 实时对话、流式响应 |
 | RAG Service | 向量检索 + 关键词混合检索 + LLM 生成 |
 | ASR Service | 语音识别（Whisper） |
-| TTS Service | 语音合成（GPT-SoVITS） |
+| TTS Service | 语音合成（Kokoro） |
 | Digital Human Service | 数字人口型/表情驱动（MuseTalk） |
 | GPS Service | 位置计算、附近 POI 搜索、路线规划 |
 | Device Service | ESP32 设备管理、心跳监控 |
@@ -45,7 +45,7 @@
 | AI 模型 | Qwen2.5-VL / Qwen3（多模态大模型） |
 | RAG 框架 | LangChain + Qdrant（向量数据库） |
 | 语音识别 | Whisper / FunASR |
-| 语音合成 | GPT-SoVITS / CosyVoice |
+| 语音合成 | Kokoro |
 | 数字人 | MuseTalk / LivePortrait（2D 数字人驱动） |
 | 游客前端 | Vue 3 + TypeScript + Vite |
 | 管理后台 | Vue 3 + TypeScript + Vite |
@@ -136,17 +136,25 @@ docker-compose up -d
 
 ## 更新日志
 
+### 2026-05-26
+
+- **TTS 引擎更换为 MeloTTS** — 替换此前方案，改用 Myshell MeloTTS 轻量化中文 TTS（200MB 模型），GPU 上合成 <100ms，实现近乎瞬时的语音响应
+- **MeloTTS 全链路集成** — 后端 `TTSService` 统一使用 `melo.api.TTS`，禁用句子拆分以避免拼接缝隙和音色跳变，音频缓存机制不变
+- **MeloTTS 环境适配** — 从 GitHub 源码安装 `melotts` 包，解决 PyPI 包构建失败问题；修复 `english.py`/`chinese_mix.py` 中 BERT 模型导入导致 HF 镜像不可用时的崩溃；补装日语依赖（mecab-python3/fugashi/pykakasi/unidic）确保导入不中断
+- **保留 Qwen3-TTS 模型文件** — `models/` 目录下的 Qwen3-TTS-12Hz-0.6B 权重文件保留未删除，如需回退可直接修改 `tts.py`
+
 ### 2026-05-25
 
-- **TTS 语音合成实装** — 集成 GPT-SoVITS / CosyVoice / ChatTTS 多种引擎，支持语音播报导览文案与对话回复
+- **TTS 引擎更换为 Kokoro** — 移除旧 TTS 语音合成残留，统一使用 Kokoro-82M 中文 TTS，后端通过 `KokoroTTSEngine` 管理模型加载、分句和 WAV 拼接
+- **TTS 播放链路重构** — 前端回答语音改为一次请求完整 WAV，后端统一缓存输出，减少多段播放造成的漏句和断续
 - **网页端初步完成** — 游客前端实现数字人展示、语音输入、对话气泡、自动播放导览等功能；管理后台实现知识库管理、数据看板、数字人配置
 - **RAG 知识库检索** — 基于 Qwen 大模型 + Qdrant 向量数据库，支持景区知识的多模态检索与 LLM 生成回答
 - **ASR 语音识别** — 集成 Whisper / FunASR，支持游客语音提问
 - **Demo 导览页面** — 首次加载自动播放欢迎导览并展示景点介绍，接口分离文字与音频以优化加载速度
 - **初始回复精简** — 缩短网页首屏欢迎文案，提升用户体验
 - **修复播放/停止逻辑** — 点击停止播放时不再重新开始播放音频
-- **女声 TTS 音色** — 新增 female 音色配置（seed 222），默认使用女声
+- **女声 TTS 音色** — 默认使用 Vivian 明亮女声（映射自 voice_type=female）
 - **对话区滚动条** — 修复长回复导致 UI 被撑变形的问题，添加纵向滚动条
 - **每条回复播放按钮** — 每条 AI 回复气泡右下角添加 ▶ 按钮，支持单独重播语音
-- **PyTorch 2.12 兼容性修复** — 针对 ChatTTS 与 PyTorch 2.12 的 meta tensor 不兼容问题，对 Embed/DVAE/GPT 的 `load_pretrained` 进行 monkey-patch，确保模型正确加载
-- **设备一致性问题修复** — 修复 GPT 模型默认落到 CPU 而其他组件在 CUDA 上导致的 `RuntimeError: Expected all tensors to be on the same device` 错误
+- **前端设备状态展示** — 页面 header 显示 GPU/CPU 运行设备和 TTS 引擎名称
+- **一键启动脚本** — 创建 `start.bat`，同时启动后端（uvicorn）+ 两个前端（Vite）

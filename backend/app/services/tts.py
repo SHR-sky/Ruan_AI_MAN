@@ -1,241 +1,85 @@
-import io
-import os
-import platform
 import hashlib
+import io
 import time
-import asyncio
 import wave
 from pathlib import Path
 from typing import Optional
 
-# Use HF mirror for model download if HF_ENDPOINT not already set
-if not os.environ.get("HF_ENDPOINT"):
-    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
 from app.core.config import settings
-from app.services.text_utils import preprocess_text, split_into_sentences
+from app.services.text_utils import preprocess_text
+from app.services.tts_engines.kokoro_engine import KokoroTTSEngine
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class TTSService:
-    _shared_chat = None
-    _shared_device = None
-    _shared_load_error = None
-    _shared_speaker_embeds = {}
+    _engine = KokoroTTSEngine()
+    _cache_version = "kokoro_zh_v1"
 
     def __init__(self):
-        self.cache_dir = Path(settings.UPLOAD_DIR) / "tts_cache"
+        upload_dir = Path(settings.UPLOAD_DIR)
+        if not upload_dir.is_absolute():
+            upload_dir = BACKEND_DIR / upload_dir
+        self.cache_dir = upload_dir / "tts_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-
-        # 音色预设 (通过 random seed 控制)
-        self.voice_configs = {
-            "default": {"seed": 42, "temperature": 0.3, "style": "normal"},
-            "gentle": {"seed": 99, "temperature": 0.2, "style": "gentle"},
-            "lively": {"seed": 66, "temperature": 0.5, "style": "lively"},
-            "professional": {"seed": 77, "temperature": 0.3, "style": "professional"},
-            "female": {"seed": 222, "temperature": 0.3, "style": "normal"},
-        }
-        self.current_voice = "female"
-
-    @property
-    def chat(self):
-        if self.__class__._shared_chat is None:
-            import ChatTTS
-            import torch
-            self._patch_chattts()
-            chat = ChatTTS.Chat()
-            try:
-                device = self._resolve_device()
-                ok = chat.load(compile=False, source="huggingface", device=device)
-                if not ok:
-                    raise RuntimeError("ChatTTS load returned False")
-                self.__class__._shared_chat = chat
-            except Exception as exc:
-                self.__class__._shared_load_error = f"{type(exc).__name__}: {exc}"
-                self.__class__._shared_chat = None
-                raise
-        return self.__class__._shared_chat
-
-    def _patch_chattts(self):
-        """Monkey-patch ChatTTS for PyTorch 2.11+ meta tensor compatibility."""
-        import torch
-        import ChatTTS.model.embed as embed_m
-        import ChatTTS.model.dvae as dvae_m
-        import ChatTTS.model.gpt as gpt_m
-        from transformers import LlamaModel
-
-        def _patch_load_pretrained(cls):
-            orig = cls.load_pretrained
-            def patched(self, filename, device):
-                state_dict = _load_safetensors(filename)
-                is_meta = any(p.device.type == 'meta' for p in self.parameters())
-                if is_meta:
-                    self.to_empty(device=device)
-                self.load_state_dict(state_dict)
-                self.to(device)
-            cls.load_pretrained = patched
-
-        def _load_safetensors(path):
-            from safetensors.torch import load_file
-            return load_file(path)
-
-        _patch_load_pretrained(embed_m.Embed)
-        _patch_load_pretrained(dvae_m.DVAE)
-
-        # Patch GPT.load_pretrained — handle LlamaModel.from_pretrained meta issue
-        _orig_gpt_load = gpt_m.GPT.load_pretrained
-        def patched_gpt_load(self, gpt_folder, embed_file_path, experimental=False):
-            if self.is_vllm and platform.system().lower() == "linux":
-                return _orig_gpt_load(self, gpt_folder, embed_file_path, experimental)
-            # Don't pass device_map — let from_pretrained load on meta (default),
-            # then handle meta→target device conversion manually
-            self.gpt = LlamaModel.from_pretrained(gpt_folder)
-            if next(self.gpt.parameters()).device.type == 'meta':
-                self.gpt.to_empty(device=self.device_gpt)
-                import os
-                from safetensors.torch import load_file
-                for f in os.listdir(gpt_folder):
-                    if f.endswith('.safetensors'):
-                        sd = load_file(os.path.join(gpt_folder, f))
-                        self.gpt.load_state_dict(sd, strict=False)
-            else:
-                self.gpt = self.gpt.to(self.device_gpt)
-            del self.gpt.embed_tokens
-            if experimental and "cuda" in str(self.device_gpt) and platform.system().lower() == "linux":
-                try:
-                    from ChatTTS.model.cuda import TELlamaModel
-                    state_dict = self.gpt.state_dict()
-                    vanilla = TELlamaModel.from_state_dict(state_dict, self.llama_config)
-                    del state_dict, self.gpt
-                    import gc
-                    gc.collect()
-                    self.gpt = vanilla
-                    self.is_te_llama = True
-                except Exception:
-                    pass
-        gpt_m.GPT.load_pretrained = patched_gpt_load
-
-    def _resolve_device(self):
-        import torch
-
-        requested = settings.TTS_DEVICE.lower()
-        if requested in ("auto", "cuda") and torch.cuda.is_available():
-            self.__class__._shared_device = "cuda"
-            return torch.device("cuda")
-        self.__class__._shared_device = "cpu"
-        return torch.device("cpu")
-
-    def _get_speaker_embed(self, voice_type: str) -> str:
-        if voice_type not in self._shared_speaker_embeds:
-            seed = self._get_seed(voice_type)
-            import random
-            import torch
-            random.seed(seed)
-            torch.manual_seed(seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
-            self._shared_speaker_embeds[voice_type] = self.chat.sample_random_speaker()
-        return self._shared_speaker_embeds[voice_type]
+        self.current_voice = settings.TTS_VOICE or "female"
 
     def _cache_path(self, text: str, voice_type: str) -> Path:
-        speaker_tag = "fixed_speaker_v4_no_fallback"
-        key = f"{speaker_tag}_{text}_{voice_type}_{self._get_seed(voice_type)}"
-        filename = hashlib.md5(key.encode()).hexdigest() + ".wav"
+        voice = self._engine.resolve_voice(voice_type)
+        key = f"{self._cache_version}_{text}_{voice}_{self._engine.sample_rate}"
+        filename = hashlib.md5(key.encode("utf-8")).hexdigest() + ".wav"
         return self.cache_dir / filename
 
-    def _get_seed(self, voice_type: str) -> int:
-        config = self.voice_configs.get(voice_type, self.voice_configs["default"])
-        return config["seed"]
-
-    def _get_temperature(self, voice_type: str) -> float:
-        config = self.voice_configs.get(voice_type, self.voice_configs["default"])
-        return config["temperature"]
-
-    def _infer_sync(self, text: str, voice_type: Optional[str] = None) -> tuple:
-        voice = voice_type or self.current_voice
-        clean_text = preprocess_text(text)
-
-        cached = self._cache_path(clean_text, voice)
-        if cached.exists():
-            audio_bytes = cached.read_bytes()
-            with wave.open(io.BytesIO(audio_bytes), "rb") as wf:
-                duration = wf.getnframes() / wf.getframerate()
-            timestamps = self._generate_timestamps(clean_text, duration)
-            return audio_bytes, timestamps, clean_text
-
-        seed = self._get_seed(voice)
-        temperature = self._get_temperature(voice)
-        refine_tokens = 384
-        infer_tokens = 2048
-        speaker_embed = self._get_speaker_embed(voice)
-
-        from ChatTTS.core import Chat
-        params_refine = Chat.RefineTextParams(
-            temperature=temperature,
-            top_P=0.7,
-            top_K=20,
-            manual_seed=seed,
-            max_new_token=refine_tokens,
-            show_tqdm=False,
-        )
-        params_infer = Chat.InferCodeParams(
-            temperature=temperature,
-            top_P=0.7,
-            top_K=20,
-            manual_seed=seed,
-            spk_emb=speaker_embed,
-            max_new_token=infer_tokens,
-            show_tqdm=False,
-        )
-
-        wav = self.chat.infer(
-            [clean_text],
-            use_decoder=True,
-            skip_refine_text=True,
-            params_refine_text=params_refine,
-            params_infer_code=params_infer,
-        )
-
-        audio_np = wav[0]
-        sample_rate = 24000
-
-        buf = io.BytesIO()
-        import soundfile as sf
-        sf.write(buf, audio_np, sample_rate, format="WAV")
-        audio_bytes = buf.getvalue()
-        duration = len(audio_np) / sample_rate
-
-        cached.write_bytes(audio_bytes)
-
-        timestamps = self._generate_timestamps(clean_text, duration)
-        return audio_bytes, timestamps, clean_text
+    def _write_cache_atomic(self, path: Path, audio_bytes: bytes) -> None:
+        path.write_bytes(audio_bytes)
 
     def _generate_timestamps(self, text: str, duration: float) -> list:
         chars = list(text)
         seg = duration / max(len(chars), 1)
-        ts = []
+        timestamps = []
         start = 0.0
-        for ch in chars:
-            if ch.strip():
-                ts.append({"char": ch, "start": round(start, 3), "end": round(start + seg, 3)})
+        for char in chars:
+            if char.strip():
+                timestamps.append({
+                    "char": char,
+                    "start": round(start, 3),
+                    "end": round(start + seg, 3),
+                })
             start += seg
-        return ts
+        return timestamps
 
     async def synthesize(self, text: str, voice_type: Optional[str] = None) -> bytes:
-        audio, _, _ = await asyncio.to_thread(self._infer_sync, text, voice_type)
-        return audio
+        clean = preprocess_text(text)
+        if not clean:
+            return b""
+
+        voice = voice_type or self.current_voice
+        cached = self._cache_path(clean, voice)
+        if settings.TTS_CACHE_ENABLED and cached.exists():
+            return cached.read_bytes()
+
+        audio_bytes = await self._engine.synthesize_wav(clean, voice)
+        if settings.TTS_CACHE_ENABLED:
+            self._write_cache_atomic(cached, audio_bytes)
+        return audio_bytes
 
     async def synthesize_with_timestamps(self, text: str, voice_type: Optional[str] = None) -> dict:
-        audio, timestamps, clean = await asyncio.to_thread(self._infer_sync, text, voice_type)
-        return {"audio": audio, "timestamps": timestamps, "clean_text": clean}
+        audio_bytes = await self.synthesize(text, voice_type)
+        clean = preprocess_text(text)
+        if not audio_bytes:
+            return {"audio": b"", "timestamps": [], "clean_text": clean}
+
+        with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+            duration = wav_file.getnframes() / wav_file.getframerate()
+        return {
+            "audio": audio_bytes,
+            "timestamps": self._generate_timestamps(clean, duration),
+            "clean_text": clean,
+        }
 
     async def synthesize_stream(self, text: str, voice_type: Optional[str] = None):
-        sentences = split_into_sentences(text)
-        for i, sentence in enumerate(sentences):
-            if not sentence.strip():
-                continue
-            audio, timestamps, clean = await asyncio.to_thread(self._infer_sync, sentence, voice_type)
-            yield {"audio": audio, "timestamps": timestamps, "text": clean, "is_last": False}
-        yield {"audio": b"", "timestamps": [], "text": "", "is_last": True}
+        async for chunk in self._engine.synthesize_stream(preprocess_text(text), voice_type or self.current_voice):
+            yield chunk
 
     async def precache_texts(self, texts: list[str], voice_type: Optional[str] = None) -> int:
         count = 0
@@ -246,43 +90,35 @@ class TTSService:
         return count
 
     def set_voice(self, voice_type: str) -> bool:
-        if voice_type in self.voice_configs:
+        if voice_type in self.get_available_voices():
             self.current_voice = voice_type
             return True
         return False
 
     def get_available_voices(self) -> list:
-        return list(self.voice_configs.keys())
+        return list(self._engine.voice_map.keys())
 
     def get_voice_config(self, voice_type: Optional[str] = None) -> dict:
-        v = voice_type or self.current_voice
-        cfg = self.voice_configs.get(v, self.voice_configs["default"])
-        return {"voice_type": v, **cfg}
+        selected = voice_type or self.current_voice
+        return {
+            "voice_type": selected,
+            "speaker": self._engine.resolve_voice(selected),
+            "engine": self._engine.name,
+            "sample_rate": self._engine.sample_rate,
+        }
 
     def get_status(self) -> dict:
-        import torch
-        device = self.__class__._shared_device or "unknown"
-        gpu_name = ""
-        if device == "cuda" and torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            vram = torch.cuda.get_device_properties(0).total_mem // (1024**3)
-            gpu_name = f"{gpu_name} ({vram}GB VRAM)"
         return {
-            "engine": "ChatTTS",
-            "loaded": self.__class__._shared_chat is not None,
-            "requested_device": settings.TTS_DEVICE,
-            "runtime_device": device,
-            "gpu_name": gpu_name,
-            "fallback_enabled": False,
-            "last_error": self.__class__._shared_load_error,
+            **self._engine.get_status(),
             "cache_dir": str(self.cache_dir),
+            "cache_enabled": settings.TTS_CACHE_ENABLED,
         }
 
     def clear_cache(self, older_than_hours: int = 24) -> int:
         now = time.time()
         removed = 0
-        for f in self.cache_dir.iterdir():
-            if f.is_file() and f.suffix == ".wav" and now - f.stat().st_mtime > older_than_hours * 3600:
-                f.unlink()
+        for file_path in self.cache_dir.iterdir():
+            if file_path.is_file() and file_path.suffix == ".wav" and now - file_path.stat().st_mtime > older_than_hours * 3600:
+                file_path.unlink()
                 removed += 1
         return removed
