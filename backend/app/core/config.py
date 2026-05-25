@@ -26,7 +26,13 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = 52428800
 
     ASR_MODEL: str = "whisper-1"
+
+    # TTS 配置
     TTS_VOICE: str = "default"
+    TTS_DEVICE: str = "cpu"
+    TTS_LANGUAGE: str = "ZH"
+    TTS_CACHE_ENABLED: bool = True
+    TTS_CACHE_TTL_HOURS: int = 24
 
     CORS_ORIGINS: List[str] = ["*"]
 

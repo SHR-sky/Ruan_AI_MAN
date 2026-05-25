@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from app.services.rag import RAGService
 from app.services.asr import ASRService
 from app.services.tts import TTSService
@@ -24,21 +24,38 @@ async def chat_websocket(websocket: WebSocket, session_id: str):
 
 
 @router.post("/text")
-async def text_chat(query: str, session_id: str = "default"):
+async def text_chat(
+    query: str = Query(...),
+    session_id: str = Query("default"),
+    voice_type: str = Query(None, description="音色"),
+    return_audio: bool = Query(False, description="是否同时返回语音"),
+):
     answer = await rag_service.generate(query, session_id)
-    return {"answer": answer, "session_id": session_id}
+    result = {"answer": answer, "session_id": session_id}
+    if return_audio:
+        tts_result = await tts_service.synthesize_with_timestamps(answer, voice_type)
+        result["audio"] = list(tts_result["audio"])
+        result["timestamps"] = tts_result["timestamps"]
+        expression = await dh_service.generate_expression(answer)
+        result["expression_data"] = expression
+    return result
 
 
 @router.post("/voice")
-async def voice_chat(audio_base64: str, session_id: str = "default"):
+async def voice_chat(
+    audio_base64: str = Query(...),
+    session_id: str = Query("default"),
+    voice_type: str = Query(None, description="合成音色"),
+):
     text = await asr_service.transcribe(audio_base64)
     answer = await rag_service.generate(text, session_id)
-    audio_bytes = await tts_service.synthesize(answer)
+    tts_result = await tts_service.synthesize_with_timestamps(answer, voice_type)
     dh_data = await dh_service.generate_expression(answer)
     return {
         "transcribed_text": text,
         "answer": answer,
-        "audio": audio_bytes,
+        "audio": list(tts_result["audio"]),
+        "timestamps": tts_result["timestamps"],
         "expression_data": dh_data,
         "session_id": session_id,
     }
