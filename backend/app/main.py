@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.v1 import chat, knowledge, digital_human, admin, device, tts
+from app.api.v1 import chat, knowledge, digital_human, admin, device, tts, demo
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -23,6 +23,7 @@ app.include_router(digital_human.router, prefix="/api/v1/digital-human", tags=["
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["管理后台"])
 app.include_router(device.router, prefix="/api/v1/device", tags=["ESP32设备"])
 app.include_router(tts.router, prefix="/api/v1/tts", tags=["语音合成 TTS"])
+app.include_router(demo.router, prefix="/api/v1/demo", tags=["演示"])
 
 @app.get("/")
 async def root():
