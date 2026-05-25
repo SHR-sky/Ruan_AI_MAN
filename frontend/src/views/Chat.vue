@@ -15,12 +15,12 @@ const loading = ref(true)
 
 onMounted(async () => {
   try {
-    const res = await api.get('/demo/intro', { params: { voice_type: 'default' } })
-    introText.value = res.data.text
+    const res = await api.get('/demo/intro')
     introName.value = res.data.name
+    introText.value = res.data.full_text
     messages.value.push({
       role: 'assistant',
-      content: `您好！我是AI导游小导，今天为您介绍「${res.data.name}」。\n\n${res.data.full_text || res.data.text}`,
+      content: `您好！我是AI导游小导，今天为您介绍「${res.data.name}」。\n\n${res.data.full_text}`,
     })
   } catch {
     messages.value.push({ role: 'assistant', content: '您好！我是您的AI导游，请问有什么可以帮您？' })
