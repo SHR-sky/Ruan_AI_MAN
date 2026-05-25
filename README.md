@@ -148,3 +148,5 @@ docker-compose up -d
 - **女声 TTS 音色** — 新增 female 音色配置（seed 222），默认使用女声
 - **对话区滚动条** — 修复长回复导致 UI 被撑变形的问题，添加纵向滚动条
 - **每条回复播放按钮** — 每条 AI 回复气泡右下角添加 ▶ 按钮，支持单独重播语音
+- **PyTorch 2.12 兼容性修复** — 针对 ChatTTS 与 PyTorch 2.12 的 meta tensor 不兼容问题，对 Embed/DVAE/GPT 的 `load_pretrained` 进行 monkey-patch，确保模型正确加载
+- **设备一致性问题修复** — 修复 GPT 模型默认落到 CPU 而其他组件在 CUDA 上导致的 `RuntimeError: Expected all tensors to be on the same device` 错误

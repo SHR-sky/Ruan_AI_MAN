@@ -1,5 +1,6 @@
 import io
 import os
+import platform
 import hashlib
 import time
 import asyncio
@@ -39,13 +40,12 @@ class TTSService:
     def chat(self):
         if self.__class__._shared_chat is None:
             import ChatTTS
+            import torch
+            self._patch_chattts()
             chat = ChatTTS.Chat()
             try:
-                self._resolve_device()
-                # Passing device explicitly can trigger "Cannot copy out of meta
-                # tensor" in some ChatTTS/PyTorch builds. Let ChatTTS place the
-                # model itself; torch.cuda availability is still reflected in status.
-                ok = chat.load(compile=False, source="huggingface")
+                device = self._resolve_device()
+                ok = chat.load(compile=False, source="huggingface", device=device)
                 if not ok:
                     raise RuntimeError("ChatTTS load returned False")
                 self.__class__._shared_chat = chat
@@ -54,6 +54,65 @@ class TTSService:
                 self.__class__._shared_chat = None
                 raise
         return self.__class__._shared_chat
+
+    def _patch_chattts(self):
+        """Monkey-patch ChatTTS for PyTorch 2.11+ meta tensor compatibility."""
+        import torch
+        import ChatTTS.model.embed as embed_m
+        import ChatTTS.model.dvae as dvae_m
+        import ChatTTS.model.gpt as gpt_m
+        from transformers import LlamaModel
+
+        def _patch_load_pretrained(cls):
+            orig = cls.load_pretrained
+            def patched(self, filename, device):
+                state_dict = _load_safetensors(filename)
+                is_meta = any(p.device.type == 'meta' for p in self.parameters())
+                if is_meta:
+                    self.to_empty(device=device)
+                self.load_state_dict(state_dict)
+                self.to(device)
+            cls.load_pretrained = patched
+
+        def _load_safetensors(path):
+            from safetensors.torch import load_file
+            return load_file(path)
+
+        _patch_load_pretrained(embed_m.Embed)
+        _patch_load_pretrained(dvae_m.DVAE)
+
+        # Patch GPT.load_pretrained — handle LlamaModel.from_pretrained meta issue
+        _orig_gpt_load = gpt_m.GPT.load_pretrained
+        def patched_gpt_load(self, gpt_folder, embed_file_path, experimental=False):
+            if self.is_vllm and platform.system().lower() == "linux":
+                return _orig_gpt_load(self, gpt_folder, embed_file_path, experimental)
+            # Don't pass device_map — let from_pretrained load on meta (default),
+            # then handle meta→target device conversion manually
+            self.gpt = LlamaModel.from_pretrained(gpt_folder)
+            if next(self.gpt.parameters()).device.type == 'meta':
+                self.gpt.to_empty(device=self.device_gpt)
+                import os
+                from safetensors.torch import load_file
+                for f in os.listdir(gpt_folder):
+                    if f.endswith('.safetensors'):
+                        sd = load_file(os.path.join(gpt_folder, f))
+                        self.gpt.load_state_dict(sd, strict=False)
+            else:
+                self.gpt = self.gpt.to(self.device_gpt)
+            del self.gpt.embed_tokens
+            if experimental and "cuda" in str(self.device_gpt) and platform.system().lower() == "linux":
+                try:
+                    from ChatTTS.model.cuda import TELlamaModel
+                    state_dict = self.gpt.state_dict()
+                    vanilla = TELlamaModel.from_state_dict(state_dict, self.llama_config)
+                    del state_dict, self.gpt
+                    import gc
+                    gc.collect()
+                    self.gpt = vanilla
+                    self.is_te_llama = True
+                except Exception:
+                    pass
+        gpt_m.GPT.load_pretrained = patched_gpt_load
 
     def _resolve_device(self):
         import torch
