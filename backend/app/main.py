@@ -33,7 +33,7 @@ async def warmup_intro_tts():
     async def _warmup():
         try:
             intro = demo._build_intro()
-            await demo.tts_service.precache_texts([intro["intro_text"]], "default")
+            await demo.tts_service.precache_texts([intro["intro_text"]], "female")
         except Exception as exc:
             print(f"[TTS] intro warmup failed: {type(exc).__name__}: {exc}")
 

@@ -40,10 +40,10 @@ async function loadIntro() {
     introName.value = res.data.name
     introType.value = res.data.type
     introText.value = res.data.intro_text || res.data.full_text || ''
-    audioUrl.value = res.data.audio_url || '/api/v1/demo/intro/audio?voice_type=default'
+    audioUrl.value = res.data.audio_url || '/api/v1/demo/intro/audio?voice_type=female'
     messages.value.push({
       role: 'assistant',
-      content: `您好！我是小导，为您导览「${introName.value}」。\n\n${introText.value}`,
+      content: `${introText.value}`,
     })
     await nextTick()
     await playIntro(true)
@@ -127,7 +127,7 @@ async function playAssistantAnswer(text: string) {
       audioLoading.value = true
       const res = await api.post(
         '/tts/synthesize-file',
-        { text: chunk, voice_type: 'default' },
+        { text: chunk, voice_type: 'female' },
         { responseType: 'blob' },
       )
       if (runId !== speechRunId) return
@@ -220,7 +220,7 @@ function handleVoiceResult(text: string) {
         <h1>景区智能导览语音 Demo</h1>
       </div>
       <div class="header-actions" v-if="introText">
-        <button class="play-btn" :class="{ playing: isPlaying }" :disabled="audioLoading" @click="playIntro(false)">
+        <button class="play-btn" :class="{ playing: isPlaying }" :disabled="audioLoading" @click="isPlaying ? stopAudio() : playIntro(false)">
           {{ audioLoading ? '生成语音中...' : isPlaying ? '停止播放' : '播放导览' }}
         </button>
       </div>
@@ -242,7 +242,7 @@ function handleVoiceResult(text: string) {
       <section class="chat-area">
         <div class="messages">
           <div v-if="loading" class="welcome">正在加载导览服务...</div>
-          <ChatMessage v-for="(msg, idx) in messages" :key="idx" :role="msg.role" :content="msg.content" />
+          <ChatMessage v-for="(msg, idx) in messages" :key="idx" :role="msg.role" :content="msg.content" @play="playAssistantAnswer(msg.content)" />
         </div>
         <div class="input-area">
           <input v-model="inputText" type="text" placeholder="输入您的问题，如：推荐一条亲子游路线" @keyup.enter="sendText" />
@@ -256,9 +256,10 @@ function handleVoiceResult(text: string) {
 
 <style scoped>
 .chat-layout {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background:
     radial-gradient(circle at 12% 18%, rgba(255, 205, 120, 0.55), transparent 28%),
     radial-gradient(circle at 92% 10%, rgba(70, 155, 130, 0.28), transparent 32%),
@@ -316,6 +317,7 @@ function handleVoiceResult(text: string) {
   flex: 1;
   display: grid;
   grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.08fr);
+  grid-template-rows: 1fr;
   gap: 22px;
   padding: 22px;
   overflow: hidden;
@@ -377,11 +379,13 @@ function handleVoiceResult(text: string) {
 .chat-area {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 20px;
 }

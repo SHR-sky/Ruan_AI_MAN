@@ -8,7 +8,7 @@ rag_service = RAGService()
 tts_service = TTSService()
 
 
-def _first_complete_sentence(text: str, limit: int = 180) -> str:
+def _first_complete_sentence(text: str, limit: int = 50) -> str:
     compact = text.replace("\n", " ").strip()
     if not compact:
         return ""
@@ -39,7 +39,7 @@ def _build_intro() -> dict:
     content = first.get("content", "")
     summary = content.replace("\n", " ").strip()
     intro_text = (
-        f"欢迎来到{name}。我来为您介绍景区特色和推荐路线。"
+        f"欢迎来到{name}。我是AI导游小导，为您介绍景区特色和推荐路线。"
     )
     first_sentence = _first_complete_sentence(summary)
     if first_sentence:
@@ -60,13 +60,13 @@ async def get_intro():
     intro = _build_intro()
     return {
         **intro,
-        "audio_url": "/api/v1/demo/intro/audio?voice_type=default",
+        "audio_url": "/api/v1/demo/intro/audio?voice_type=female",
         "tts_status": tts_service.get_status(),
     }
 
 
 @router.get("/intro/audio")
-async def get_intro_audio(voice_type: str = Query("default")):
+async def get_intro_audio(voice_type: str = Query("female")):
     """获取默认导览的 WAV 音频。"""
     intro = _build_intro()
     audio_bytes = await tts_service.synthesize(intro["intro_text"], voice_type)
@@ -80,7 +80,7 @@ async def get_intro_audio(voice_type: str = Query("default")):
 
 
 @router.post("/intro/precache")
-async def precache_intro(voice_type: str = Query("default")):
+async def precache_intro(voice_type: str = Query("female")):
     """提前生成导览音频，降低网页首次播放等待时间。"""
     intro = _build_intro()
     count = await tts_service.precache_texts([intro["intro_text"]], voice_type)

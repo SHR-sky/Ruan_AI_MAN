@@ -31,8 +31,9 @@ class TTSService:
             "gentle": {"seed": 99, "temperature": 0.2, "style": "gentle"},
             "lively": {"seed": 66, "temperature": 0.5, "style": "lively"},
             "professional": {"seed": 77, "temperature": 0.3, "style": "professional"},
+            "female": {"seed": 222, "temperature": 0.3, "style": "normal"},
         }
-        self.current_voice = "default"
+        self.current_voice = "female"
 
     @property
     def chat(self):
