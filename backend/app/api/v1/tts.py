@@ -55,6 +55,12 @@ async def list_voices():
     }
 
 
+@router.get("/status")
+async def tts_status():
+    """获取 TTS 引擎状态，供网页和 ESP32 网关自检使用。"""
+    return tts_service.get_status()
+
+
 @router.post("/voice")
 async def set_voice(voice_type: str = Body(..., embed=True)):
     """切换当前音色"""
@@ -77,8 +83,8 @@ async def precache(
     voice_type: str = Body("default"),
 ):
     """预合成常用文本到缓存"""
-    tts_service.precache_texts(texts, voice_type)
-    return {"status": "ok", "count": len(texts)}
+    count = await tts_service.precache_texts(texts, voice_type)
+    return {"status": "ok", "count": count}
 
 
 @router.post("/clear-cache")

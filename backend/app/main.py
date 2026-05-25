@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
@@ -24,6 +26,19 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["管理后台"])
 app.include_router(device.router, prefix="/api/v1/device", tags=["ESP32设备"])
 app.include_router(tts.router, prefix="/api/v1/tts", tags=["语音合成 TTS"])
 app.include_router(demo.router, prefix="/api/v1/demo", tags=["演示"])
+
+
+@app.on_event("startup")
+async def warmup_intro_tts():
+    async def _warmup():
+        try:
+            intro = demo._build_intro()
+            await demo.tts_service.precache_texts([intro["intro_text"]], "default")
+        except Exception as exc:
+            print(f"[TTS] intro warmup failed: {type(exc).__name__}: {exc}")
+
+    asyncio.create_task(_warmup())
+
 
 @app.get("/")
 async def root():

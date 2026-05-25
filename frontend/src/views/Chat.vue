@@ -1,54 +1,194 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import DigitalHuman from '../components/DigitalHuman.vue'
 import ChatMessage from '../components/ChatMessage.vue'
 import VoiceInput from '../components/VoiceInput.vue'
 import api from '../api'
 
-const messages = ref<Array<{ role: string; content: string }>>([])
+type Message = { role: string; content: string }
+
+const messages = ref<Message[]>([])
 const inputText = ref('')
 const introText = ref('')
 const introName = ref('')
+const introType = ref('')
+const audioUrl = ref('')
 const isPlaying = ref(false)
-const audioRef = ref<HTMLAudioElement | null>(null)
 const loading = ref(true)
+const audioLoading = ref(false)
+const autoplayBlocked = ref(false)
+const audioError = ref('')
+const audioRef = ref<HTMLAudioElement | null>(null)
+const objectAudioUrl = ref('')
+let speechRunId = 0
 
 onMounted(async () => {
-  try {
-    const res = await api.get('/demo/intro')
-    introName.value = res.data.name
-    introText.value = res.data.full_text
-    messages.value.push({
-      role: 'assistant',
-      content: `您好！我是AI导游小导，今天为您介绍「${res.data.name}」。\n\n${res.data.full_text}`,
-    })
-  } catch {
-    messages.value.push({ role: 'assistant', content: '您好！我是您的AI导游，请问有什么可以帮您？' })
-  } finally {
-    loading.value = false
+  await loadIntro()
+})
+
+onBeforeUnmount(() => {
+  stopAudio()
+  if (objectAudioUrl.value) {
+    URL.revokeObjectURL(objectAudioUrl.value)
   }
 })
 
-async function playIntro() {
-  if (isPlaying.value) {
-    audioRef.value?.pause()
-    isPlaying.value = false
-    return
-  }
+async function loadIntro() {
+  loading.value = true
   try {
-    isPlaying.value = true
-    const res = await api.get('/demo/intro/audio', {
-      params: { voice_type: 'default' },
-      responseType: 'blob',
+    const res = await api.get('/demo/intro')
+    introName.value = res.data.name
+    introType.value = res.data.type
+    introText.value = res.data.intro_text || res.data.full_text || ''
+    audioUrl.value = res.data.audio_url || '/api/v1/demo/intro/audio?voice_type=default'
+    messages.value.push({
+      role: 'assistant',
+      content: `您好！我是小导，为您导览「${introName.value}」。\n\n${introText.value}`,
     })
-    const url = URL.createObjectURL(res.data)
-    const audio = new Audio(url)
+    await nextTick()
+    await playIntro(true)
+  } catch {
+    messages.value.push({ role: 'assistant', content: '您好！我是AI导游，后端服务暂不可用。' })
+  } finally {
+    loading.value = false
+  }
+}
+
+function stopAudio() {
+  speechRunId += 1
+  if (audioRef.value) {
+    audioRef.value.pause()
+    audioRef.value.currentTime = 0
+  }
+  isPlaying.value = false
+}
+
+async function playAudioSource(source: string, fromAutoplay = false) {
+  if (!source) return
+  if (isPlaying.value) {
+    stopAudio()
+  }
+
+  audioLoading.value = true
+  audioError.value = ''
+  autoplayBlocked.value = false
+
+  try {
+    const audio = audioRef.value ?? new Audio()
     audioRef.value = audio
-    audio.onended = () => { isPlaying.value = false; URL.revokeObjectURL(url) }
-    audio.play()
+    audio.preload = 'auto'
+    audio.src = source
+    audio.onplaying = () => {
+      isPlaying.value = true
+      audioLoading.value = false
+    }
+    audio.onended = () => {
+      isPlaying.value = false
+      audioLoading.value = false
+    }
+    audio.onerror = () => {
+      isPlaying.value = false
+      audioLoading.value = false
+      audioError.value = '导览音频加载失败，请确认后端 TTS 服务已启动。'
+    }
+
+    await audio.play()
+  } catch (error) {
+    isPlaying.value = false
+    audioLoading.value = false
+    if (fromAutoplay) {
+      autoplayBlocked.value = true
+      audioError.value = '浏览器阻止了自动有声播放，请点击“播放导览”。'
+      return
+    }
+    audioError.value = '播放失败，请稍后重试。'
+  }
+}
+
+async function playIntro(fromAutoplay = false) {
+  if (!audioUrl.value) return
+  const source = `${audioUrl.value}${audioUrl.value.includes('?') ? '&' : '?'}t=${Date.now()}`
+  await playAudioSource(source, fromAutoplay)
+}
+
+async function playAssistantAnswer(text: string) {
+  const chunks = splitSpeechChunks(text)
+  if (!chunks.length) return
+
+  try {
+    audioError.value = ''
+    if (isPlaying.value) {
+      stopAudio()
+    }
+    const runId = ++speechRunId
+
+    for (const chunk of chunks) {
+      if (runId !== speechRunId) return
+      audioLoading.value = true
+      const res = await api.post(
+        '/tts/synthesize-file',
+        { text: chunk, voice_type: 'default' },
+        { responseType: 'blob' },
+      )
+      if (runId !== speechRunId) return
+      if (objectAudioUrl.value) {
+        URL.revokeObjectURL(objectAudioUrl.value)
+      }
+      objectAudioUrl.value = URL.createObjectURL(res.data)
+      await playAudioAndWait(objectAudioUrl.value, runId)
+    }
   } catch {
     isPlaying.value = false
+    audioLoading.value = false
+    audioError.value = '回答语音生成失败，请确认后端 TTS 服务可用。'
   }
+}
+
+function splitSpeechChunks(text: string) {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return []
+  const pieces = normalized.match(/[^。！？!?；;]+[。！？!?；;]?/g) ?? [normalized]
+  const chunks: string[] = []
+  let current = ''
+
+  for (const piece of pieces) {
+    if ((current + piece).length > 130 && current) {
+      chunks.push(current)
+      current = piece
+    } else {
+      current += piece
+    }
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
+async function playAudioAndWait(source: string, runId: number) {
+  const audio = audioRef.value ?? new Audio()
+  audioRef.value = audio
+  audio.preload = 'auto'
+  audio.src = source
+
+  await new Promise<void>((resolve, reject) => {
+    audio.onplaying = () => {
+      if (runId !== speechRunId) {
+        resolve()
+        return
+      }
+      isPlaying.value = true
+      audioLoading.value = false
+    }
+    audio.onended = () => {
+      isPlaying.value = false
+      audioLoading.value = false
+      resolve()
+    }
+    audio.onpause = () => {
+      if (runId !== speechRunId) resolve()
+    }
+    audio.onerror = () => reject(new Error('audio playback failed'))
+    audio.play().catch(reject)
+  })
 }
 
 async function sendText() {
@@ -58,7 +198,9 @@ async function sendText() {
   inputText.value = ''
   try {
     const res = await api.post('/chat/text', null, { params: { query, session_id: 'demo' } })
-    messages.value.push({ role: 'assistant', content: res.data.answer })
+    const answer = res.data.answer || ''
+    messages.value.push({ role: 'assistant', content: answer })
+    await playAssistantAnswer(answer)
   } catch {
     messages.value.push({ role: 'assistant', content: '[AI服务暂不可用]' })
   }
@@ -73,125 +215,223 @@ function handleVoiceResult(text: string) {
 <template>
   <div class="chat-layout">
     <header class="chat-header">
-      <h1>景区智能导览</h1>
+      <div>
+        <p class="eyebrow">Scenic Guide AI</p>
+        <h1>景区智能导览语音 Demo</h1>
+      </div>
       <div class="header-actions" v-if="introText">
-        <button class="play-btn" :class="{ playing: isPlaying }" @click="playIntro">
-          {{ isPlaying ? '⏹ 停止' : '▶ 语音介绍' }}
+        <button class="play-btn" :class="{ playing: isPlaying }" :disabled="audioLoading" @click="playIntro(false)">
+          {{ audioLoading ? '生成语音中...' : isPlaying ? '停止播放' : '播放导览' }}
         </button>
       </div>
     </header>
+
     <main class="chat-main">
-      <div class="digital-human-area">
+      <section class="digital-human-area">
         <DigitalHuman :speaking="isPlaying" />
-      </div>
-      <div class="chat-area">
-        <div class="messages">
-          <div v-if="loading" class="welcome">加载中...</div>
-          <ChatMessage v-for="(msg, idx) in messages" :key="idx" :role="msg.role" :content="msg.content" />
-          <div v-if="!loading && messages.length === 1 && introName" class="demo-hint">
-            <p>📢 正在为您介绍「{{ introName }}」</p>
+        <div class="guide-card">
+          <span class="tag">{{ introType || '知识库导览' }}</span>
+          <h2>{{ introName || '正在加载景点' }}</h2>
+          <p>{{ introText || '正在从本地知识库生成导览词。' }}</p>
+          <div v-if="autoplayBlocked || audioError" class="audio-alert">
+            {{ audioError }}
           </div>
         </div>
+      </section>
+
+      <section class="chat-area">
+        <div class="messages">
+          <div v-if="loading" class="welcome">正在加载导览服务...</div>
+          <ChatMessage v-for="(msg, idx) in messages" :key="idx" :role="msg.role" :content="msg.content" />
+        </div>
         <div class="input-area">
-          <input v-model="inputText" type="text" placeholder="输入您的问题，如：介绍一下这个景点" @keyup.enter="sendText" />
+          <input v-model="inputText" type="text" placeholder="输入您的问题，如：推荐一条亲子游路线" @keyup.enter="sendText" />
           <button @click="sendText">发送</button>
           <VoiceInput @result="handleVoiceResult" />
         </div>
-      </div>
+      </section>
     </main>
   </div>
 </template>
 
 <style scoped>
 .chat-layout {
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background: #f5f7fa;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(255, 205, 120, 0.55), transparent 28%),
+    radial-gradient(circle at 92% 10%, rgba(70, 155, 130, 0.28), transparent 32%),
+    linear-gradient(135deg, #f7efe0 0%, #eef4e8 45%, #dfe9dd 100%);
+  color: #20342b;
 }
+
 .chat-header {
-  background: linear-gradient(135deg, #1a73e8, #0d47a1);
-  color: white;
-  padding: 12px 24px;
+  padding: 18px 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  border-bottom: 1px solid rgba(58, 80, 64, 0.14);
+  backdrop-filter: blur(14px);
 }
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: #6f7d57;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
 .chat-header h1 {
   margin: 0;
-  font-size: 20px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 26px;
+  letter-spacing: 0.02em;
 }
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
+
 .play-btn {
-  padding: 6px 16px;
-  border: 1px solid rgba(255,255,255,0.5);
-  border-radius: 20px;
-  background: rgba(255,255,255,0.15);
-  color: white;
+  min-width: 132px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #20342b;
+  color: #fff8ec;
   cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s;
+  font-weight: 700;
+  box-shadow: 0 12px 28px rgba(32, 52, 43, 0.22);
 }
-.play-btn:hover { background: rgba(255,255,255,0.3); }
-.play-btn.playing { background: #ef5350; border-color: #ef5350; }
+
+.play-btn:disabled {
+  cursor: wait;
+  opacity: 0.76;
+}
+
+.play-btn.playing {
+  background: #b64632;
+}
+
 .chat-main {
-  display: flex;
   flex: 1;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.08fr);
+  gap: 22px;
+  padding: 22px;
   overflow: hidden;
 }
-.digital-human-area {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #e8edf3;
-}
+
+.digital-human-area,
 .chat-area {
-  flex: 1;
+  min-height: 0;
+  border: 1px solid rgba(58, 80, 64, 0.14);
+  border-radius: 28px;
+  background: rgba(255, 252, 244, 0.72);
+  box-shadow: 0 22px 70px rgba(55, 74, 54, 0.14);
+}
+
+.digital-human-area {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+}
+
+.guide-card {
+  margin: 0 22px 22px;
+  padding: 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(58, 80, 64, 0.12);
+}
+
+.tag {
+  display: inline-flex;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #dbe8ce;
+  color: #50623b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.guide-card h2 {
+  margin: 12px 0 8px;
+  font-size: 24px;
+}
+
+.guide-card p {
+  margin: 0;
+  color: #526257;
+  line-height: 1.7;
+}
+
+.audio-alert {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff0d6;
+  color: #8a4b12;
+  font-size: 13px;
+}
+
+.chat-area {
   display: flex;
   flex-direction: column;
-  border-left: 1px solid #ddd;
+  overflow: hidden;
 }
+
 .messages {
   flex: 1;
   overflow-y: auto;
+  padding: 20px;
+}
+
+.welcome {
   padding: 16px;
+  color: #6b765f;
 }
-.welcome, .demo-hint {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #999;
-  font-size: 16px;
-}
+
 .input-area {
   display: flex;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid #ddd;
-  background: white;
+  gap: 10px;
+  padding: 16px;
+  border-top: 1px solid rgba(58, 80, 64, 0.12);
+  background: rgba(255, 255, 255, 0.62);
 }
+
 .input-area input {
   flex: 1;
-  padding: 10px 14px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(58, 80, 64, 0.2);
+  border-radius: 14px;
+  background: #fffdf8;
   font-size: 14px;
   outline: none;
 }
-.input-area input:focus { border-color: #1a73e8; }
+
+.input-area input:focus {
+  border-color: #5f7f4e;
+  box-shadow: 0 0 0 3px rgba(95, 127, 78, 0.12);
+}
+
 .input-area button {
-  padding: 10px 20px;
-  background: #1a73e8;
+  padding: 12px 18px;
+  background: #5f7f4e;
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 14px;
   cursor: pointer;
-  font-size: 14px;
+  font-weight: 700;
 }
-.input-area button:hover { background: #1557b0; }
+
+@media (max-width: 860px) {
+  .chat-main {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .digital-human-area {
+    min-height: 520px;
+  }
+}
 </style>

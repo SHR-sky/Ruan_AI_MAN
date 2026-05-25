@@ -31,6 +31,7 @@ defineProps<{
   font-size: 14px;
   line-height: 1.5;
   word-break: break-word;
+  white-space: pre-line;
 }
 .user .bubble {
   background: #1a73e8;

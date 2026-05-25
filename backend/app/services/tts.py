@@ -7,15 +7,21 @@ import wave
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
+# Use HF mirror for model download if HF_ENDPOINT not already set
+if not os.environ.get("HF_ENDPOINT"):
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 from app.core.config import settings
 from app.services.text_utils import preprocess_text, split_into_sentences
 
 
 class TTSService:
+    _shared_chat = None
+    _shared_device = None
+    _shared_load_error = None
+    _shared_speaker_embeds = {}
+
     def __init__(self):
-        self._chat = None
         self.cache_dir = Path(settings.UPLOAD_DIR) / "tts_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -27,19 +33,52 @@ class TTSService:
             "professional": {"seed": 77, "temperature": 0.3, "style": "professional"},
         }
         self.current_voice = "default"
-        self._speaker_embed = None
 
     @property
     def chat(self):
-        if self._chat is None:
+        if self.__class__._shared_chat is None:
             import ChatTTS
-            self._chat = ChatTTS.Chat()
-            self._chat.load(compile=False, source="huggingface")
-            self._rand_spk = self._chat.sample_random_speaker()
-        return self._chat
+            chat = ChatTTS.Chat()
+            try:
+                self._resolve_device()
+                # Passing device explicitly can trigger "Cannot copy out of meta
+                # tensor" in some ChatTTS/PyTorch builds. Let ChatTTS place the
+                # model itself; torch.cuda availability is still reflected in status.
+                ok = chat.load(compile=False, source="huggingface")
+                if not ok:
+                    raise RuntimeError("ChatTTS load returned False")
+                self.__class__._shared_chat = chat
+            except Exception as exc:
+                self.__class__._shared_load_error = f"{type(exc).__name__}: {exc}"
+                self.__class__._shared_chat = None
+                raise
+        return self.__class__._shared_chat
+
+    def _resolve_device(self):
+        import torch
+
+        requested = settings.TTS_DEVICE.lower()
+        if requested in ("auto", "cuda") and torch.cuda.is_available():
+            self.__class__._shared_device = "cuda"
+            return torch.device("cuda")
+        self.__class__._shared_device = "cpu"
+        return torch.device("cpu")
+
+    def _get_speaker_embed(self, voice_type: str) -> str:
+        if voice_type not in self._shared_speaker_embeds:
+            seed = self._get_seed(voice_type)
+            import random
+            import torch
+            random.seed(seed)
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+            self._shared_speaker_embeds[voice_type] = self.chat.sample_random_speaker()
+        return self._shared_speaker_embeds[voice_type]
 
     def _cache_path(self, text: str, voice_type: str) -> Path:
-        key = f"{text}_{voice_type}"
+        speaker_tag = "fixed_speaker_v4_no_fallback"
+        key = f"{speaker_tag}_{text}_{voice_type}_{self._get_seed(voice_type)}"
         filename = hashlib.md5(key.encode()).hexdigest() + ".wav"
         return self.cache_dir / filename
 
@@ -65,22 +104,35 @@ class TTSService:
 
         seed = self._get_seed(voice)
         temperature = self._get_temperature(voice)
+        refine_tokens = 384
+        infer_tokens = 2048
+        speaker_embed = self._get_speaker_embed(voice)
 
-        torch_params = {
-            "temperature": temperature,
-            "top_P": 0.7,
-            "top_K": 20,
-        }
-        # Use a consistent seed for reproducibility
-        infer_seed = seed
-        torch_manual_seed = __import__("torch").manual_seed
-        torch_manual_seed(infer_seed)
+        from ChatTTS.core import Chat
+        params_refine = Chat.RefineTextParams(
+            temperature=temperature,
+            top_P=0.7,
+            top_K=20,
+            manual_seed=seed,
+            max_new_token=refine_tokens,
+            show_tqdm=False,
+        )
+        params_infer = Chat.InferCodeParams(
+            temperature=temperature,
+            top_P=0.7,
+            top_K=20,
+            manual_seed=seed,
+            spk_emb=speaker_embed,
+            max_new_token=infer_tokens,
+            show_tqdm=False,
+        )
 
         wav = self.chat.infer(
             [clean_text],
             use_decoder=True,
-            params_refine_text=torch_params,
-            params_infer_code=torch_params,
+            skip_refine_text=True,
+            params_refine_text=params_refine,
+            params_infer_code=params_infer,
         )
 
         audio_np = wav[0]
@@ -90,8 +142,8 @@ class TTSService:
         import soundfile as sf
         sf.write(buf, audio_np, sample_rate, format="WAV")
         audio_bytes = buf.getvalue()
-
         duration = len(audio_np) / sample_rate
+
         cached.write_bytes(audio_bytes)
 
         timestamps = self._generate_timestamps(clean_text, duration)
@@ -125,6 +177,14 @@ class TTSService:
             yield {"audio": audio, "timestamps": timestamps, "text": clean, "is_last": False}
         yield {"audio": b"", "timestamps": [], "text": "", "is_last": True}
 
+    async def precache_texts(self, texts: list[str], voice_type: Optional[str] = None) -> int:
+        count = 0
+        for text in texts:
+            if text and text.strip():
+                await self.synthesize(text, voice_type)
+                count += 1
+        return count
+
     def set_voice(self, voice_type: str) -> bool:
         if voice_type in self.voice_configs:
             self.current_voice = voice_type
@@ -138,6 +198,17 @@ class TTSService:
         v = voice_type or self.current_voice
         cfg = self.voice_configs.get(v, self.voice_configs["default"])
         return {"voice_type": v, **cfg}
+
+    def get_status(self) -> dict:
+        return {
+            "engine": "ChatTTS",
+            "loaded": self.__class__._shared_chat is not None,
+            "requested_device": settings.TTS_DEVICE,
+            "runtime_device": self.__class__._shared_device,
+            "fallback_enabled": False,
+            "last_error": self.__class__._shared_load_error,
+            "cache_dir": str(self.cache_dir),
+        }
 
     def clear_cache(self, older_than_hours: int = 24) -> int:
         now = time.time()

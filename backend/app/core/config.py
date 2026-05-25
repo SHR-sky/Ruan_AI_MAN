@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # TTS 配置
     TTS_VOICE: str = "default"
-    TTS_DEVICE: str = "cpu"
+    TTS_DEVICE: str = "auto"
     TTS_LANGUAGE: str = "ZH"
     TTS_CACHE_ENABLED: bool = True
     TTS_CACHE_TTL_HOURS: int = 24

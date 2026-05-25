@@ -8,32 +8,83 @@ rag_service = RAGService()
 tts_service = TTSService()
 
 
-@router.get("/intro")
-async def get_intro():
-    """获取默认景点介绍（仅文字，不含语音）"""
+def _first_complete_sentence(text: str, limit: int = 180) -> str:
+    compact = text.replace("\n", " ").strip()
+    if not compact:
+        return ""
+    for mark in "。！？!?":
+        idx = compact.find(mark)
+        if 0 < idx <= limit:
+            return compact[:idx + 1]
+    if len(compact) <= limit:
+        return compact
+    cut = compact[:limit].rstrip("，、；;：:")
+    return f"{cut}。"
+
+
+def _build_intro() -> dict:
     rag_service._ensure_loaded()
     if not rag_service.knowledge_items:
-        return {"text": "暂无知识库数据"}
+        text = "欢迎使用景区导览服务。暂无景点数据，请先导入资料。"
+        return {
+            "name": "景区导览",
+            "type": "系统导览",
+            "intro_text": text,
+            "full_text": text,
+            "source": "empty",
+        }
 
     first = rag_service.knowledge_items[0]
+    name = first.get("name", "示范景区")
+    content = first.get("content", "")
+    summary = content.replace("\n", " ").strip()
+    intro_text = (
+        f"欢迎来到{name}。我来为您介绍景区特色和推荐路线。"
+    )
+    first_sentence = _first_complete_sentence(summary)
+    if first_sentence:
+        intro_text = f"{intro_text}{first_sentence}"
+
     return {
-        "name": first["name"],
-        "type": first["type"],
-        "full_text": first["content"][:800],
+        "name": name,
+        "type": first.get("type", "景点"),
+        "intro_text": intro_text,
+        "full_text": content[:800],
+        "source": first.get("source", "knowledge_base"),
+    }
+
+
+@router.get("/intro")
+async def get_intro():
+    """获取网页演示导览文案和音频入口。"""
+    intro = _build_intro()
+    return {
+        **intro,
+        "audio_url": "/api/v1/demo/intro/audio?voice_type=default",
+        "tts_status": tts_service.get_status(),
     }
 
 
 @router.get("/intro/audio")
 async def get_intro_audio(voice_type: str = Query("default")):
-    """获取默认介绍的 WAV 音频（首次调用会加载ChatTTS模型，约需5-10秒）"""
-    rag_service._ensure_loaded()
-    if not rag_service.knowledge_items:
-        return Response(content=b"", media_type="audio/wav")
+    """获取默认导览的 WAV 音频。"""
+    intro = _build_intro()
+    audio_bytes = await tts_service.synthesize(intro["intro_text"], voice_type)
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
 
-    first = rag_service.knowledge_items[0]
-    intro_text = f"欢迎来到{first['name']}。{first['content'][:300]}"
-    audio_bytes = await tts_service.synthesize(intro_text, voice_type)
-    return Response(content=audio_bytes, media_type="audio/wav")
+
+@router.post("/intro/precache")
+async def precache_intro(voice_type: str = Query("default")):
+    """提前生成导览音频，降低网页首次播放等待时间。"""
+    intro = _build_intro()
+    count = await tts_service.precache_texts([intro["intro_text"]], voice_type)
+    return {"status": "ok", "count": count, "tts_status": tts_service.get_status()}
 
 
 @router.get("/attractions")

@@ -51,6 +51,17 @@ class RAGService:
             tokens.add(chars[i] + chars[i + 1])
         return tokens
 
+    def _find_item_by_name(self, query: str) -> Optional[dict]:
+        query_lower = query.lower().strip()
+        matches = []
+        for item in self.knowledge_items:
+            name = item.get("name", "").strip()
+            if name and name.lower() in query_lower:
+                matches.append(item)
+        if not matches:
+            return None
+        return max(matches, key=lambda item: len(item.get("name", "")))
+
     def _keyword_search(self, query: str, top_k: int = 5) -> list:
         """关键词搜索：字符级 + 词组级混合匹配"""
         query_lower = query.lower().strip()
@@ -77,7 +88,8 @@ class RAGService:
             char_ratio = char_match / max(len(query_chars), 1)
 
             # Name boost
-            name_boost = 2.0 if query_lower in name.lower() else 1.0
+            name_lower = name.lower()
+            name_boost = 4.0 if (query_lower in name_lower or name_lower in query_lower) else 1.0
 
             score = (phrase_match + term_ratio * 2 + char_ratio * 1) * name_boost
 
@@ -85,31 +97,58 @@ class RAGService:
                 scored.append((score, item))
 
         scored.sort(key=lambda x: -x[0])
-        return [{"content": item["content"][:1000], "score": round(s, 3), "name": item["name"]}
-                for s, item in scored[:top_k] if s > 0.5]
+        return [
+            {
+                "content": item["content"],
+                "score": round(s, 3),
+                "name": item["name"],
+                "type": item.get("type", "景点"),
+            }
+            for s, item in scored[:top_k] if s > 0.5
+        ]
 
     def _search_faq(self, query: str) -> Optional[dict]:
         """FAQ 精确匹配"""
         query_lower = query.lower().strip()
-        for faq in self.faqs:
-            if faq["question"].lower() == query_lower:
-                return faq
+        exact_matches = [
+            faq for faq in self.faqs
+            if faq["question"].lower().strip() == query_lower
+            and self._is_complete_answer(faq.get("answer", ""))
+        ]
+        if exact_matches:
+            return max(exact_matches, key=lambda faq: len(faq.get("answer", "")))
+
         # Fuzzy match: query contained in FAQ question
         best = None
-        best_len = 0
+        best_score = -1
         for faq in self.faqs:
+            if not self._is_complete_answer(faq.get("answer", "")):
+                continue
             q = faq["question"].lower()
             if query_lower in q or q in query_lower:
-                if len(q) > best_len:
+                score = len(q) * 10 + len(faq.get("answer", ""))
+                if score > best_score:
                     best = faq
-                    best_len = len(q)
+                    best_score = score
         return best
+
+    def _is_complete_answer(self, answer: str) -> bool:
+        text = answer.strip()
+        if not text:
+            return False
+        if len(text) < 120:
+            return True
+        return text[-1] in "。！？.!?）】」”"
 
     async def generate(self, query: str, session_id: str = "default") -> str:
         self._ensure_loaded()
 
         if not query or not query.strip():
             return "请问您想了解什么？"
+
+        named_item = self._find_item_by_name(query)
+        if named_item:
+            return named_item.get("content", "")
 
         # 1. FAQ exact match first
         faq_match = self._search_faq(query)
@@ -123,7 +162,7 @@ class RAGService:
             # If name matches, return a structured answer
             name = best.get("name", "")
             if name and any(term in query for term in [name, name[:2]]):
-                return best["content"][:800]
+                return best["content"]
 
             # General answer with top results
             answer_parts = [f"为您找到以下相关信息："]

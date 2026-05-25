@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Query, Body
+from fastapi.responses import Response
 from app.services.gps import GPSService
 from app.services.rag import RAGService
+from app.services.tts import TTSService
 
 router = APIRouter()
 gps_service = GPSService()
 rag_service = RAGService()
+tts_service = TTSService()
 
 
 @router.get("/pois")
@@ -56,6 +59,21 @@ async def device_query(
         "answer": answer,
         "nearby_pois": nearby_context,
     }
+
+
+@router.post("/query/audio")
+async def device_query_audio(
+    device_id: str = Body(..., description="设备ID"),
+    query: str = Body(..., description="游客提问文本"),
+    voice_type: str = Body("default", description="TTS音色"),
+):
+    """ESP32/网关语音接口：文本问答后直接返回 WAV 音频。"""
+    answer = await rag_service.generate(query, session_id=device_id)
+    audio_bytes = await tts_service.synthesize(answer[:180], voice_type)
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+    )
 
 
 @router.post("/gps")
@@ -145,6 +163,7 @@ async def device_info():
         "endpoints": {
             "gps_report": "POST /api/v1/device/gps",
             "query": "POST /api/v1/device/query",
+            "query_audio": "POST /api/v1/device/query/audio",
             "nearby_pois": "GET /api/v1/device/pois",
             "nearest_poi": "GET /api/v1/device/pois/nearest",
             "route": "GET /api/v1/device/route",
