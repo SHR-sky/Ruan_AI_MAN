@@ -138,10 +138,12 @@ docker-compose up -d
 
 ### 2026-05-26
 
-- **TTS 引擎更换为 MeloTTS** — 替换此前方案，改用 Myshell MeloTTS 轻量化中文 TTS（200MB 模型），GPU 上合成 <100ms，实现近乎瞬时的语音响应
-- **MeloTTS 全链路集成** — 后端 `TTSService` 统一使用 `melo.api.TTS`，禁用句子拆分以避免拼接缝隙和音色跳变，音频缓存机制不变
-- **MeloTTS 环境适配** — 从 GitHub 源码安装 `melotts` 包，解决 PyPI 包构建失败问题；修复 `english.py`/`chinese_mix.py` 中 BERT 模型导入导致 HF 镜像不可用时的崩溃；补装日语依赖（mecab-python3/fugashi/pykakasi/unidic）确保导入不中断
-- **保留 Qwen3-TTS 模型文件** — `models/` 目录下的 Qwen3-TTS-12Hz-0.6B 权重文件保留未删除，如需回退可直接修改 `tts.py`
+- **TTS 引擎更换为 Kokoro-82M** — 统一使用 `KokoroTTSEngine`，基于 `kokoro` 包（KPipeline + KModel）驱动，模型文件存放于 `models/kokoro/`（config.json + kokoro-v1_0.pth + voices/*.pt）
+- **多中文音色** — 内置 `zf_xiaoxiao`（默认/女声）、`zf_xiaoni`（温柔）、`zf_xiaobei`（活泼）、`zm_yunxi`（男声）四种音色，前端按 voice_type 映射
+- **分句合成 + 间隙拼接** — 按标点切句（最长 180 字符），逐句异步合成后以 15ms 静音间隙拼接，平衡自然停顿与整段输出
+- **依赖精简** — 新增 `kokoro>=0.9.4`、`misaki[zh]>=0.9.4`，采样率 24000 Hz，无需额外 BERT 模型下载
+- **移除 DevContainer 引用** — `.devcontainer/`、`.vscode/` 不再纳入版本管理
+- **验证脚本** — `scripts/verify_tts/test_kokoro.py` 可直接运行验证合成流程
 
 ### 2026-05-25
 
