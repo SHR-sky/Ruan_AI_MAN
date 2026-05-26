@@ -154,6 +154,7 @@ async function sendText() {
     const res = await api.post('/chat/text', null, { params: { query, session_id: 'demo' } })
     const answer = res.data.answer || ''
     messages.value.push({ role: 'assistant', content: answer })
+    dhRef.value?.triggerExpression?.('smile')
     await playAssistantAnswer(answer)
   } catch {
     messages.value.push({ role: 'assistant', content: '[AI服务暂不可用]' })

@@ -1,45 +1,118 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { Application, Ticker } from 'pixi.js'
+import { Config, Live2DSprite, Priority, LogLevel } from 'easy-live2d'
 
 const props = defineProps<{ speaking?: boolean }>()
 
+const wrapperRef = ref<HTMLDivElement | null>(null)
+const canvasRef = ref<HTMLCanvasElement | null>(null)
+const loaded = ref(false)
+const webglFailed = ref(false)
 const isSpeaking = ref(false)
 
+let app: Application | null = null
+let sprite: Live2DSprite | null = null
 let currentRunId = 0
+let fallbackAudio: HTMLAudioElement | null = null
+
+onMounted(async () => {
+  await nextTick()
+  try {
+    Config.MotionGroupIdle = 'Idle'
+    Config.MouseFollow = false
+    Config.CubismLoggingLevel = LogLevel.LogLevel_Error
+
+    app = new Application()
+    await app.init({
+      canvas: canvasRef.value!,
+      backgroundAlpha: 0,
+      autoDensity: true,
+      antialias: true,
+      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      resizeTo: wrapperRef.value!,
+    })
+
+    sprite = new Live2DSprite({
+      modelPath: '/Resources/Hiyori/Hiyori.model3.json',
+      ticker: Ticker.shared,
+    })
+
+    sprite.anchor.set(0.5, 1)
+    sprite.x = canvasRef.value!.clientWidth / 2
+    sprite.y = canvasRef.value!.clientHeight
+    sprite.width = canvasRef.value!.clientWidth * 1.2
+
+    app.stage.addChild(sprite)
+
+    sprite.onLive2D('ready', () => {
+      loaded.value = true
+      sprite?.startRandomMotion({ group: 'Idle', priority: Priority.Idle })
+    })
+
+    sprite.onLive2D('hit', async ({ hitAreaName }) => {
+      if (hitAreaName === 'Body') {
+        await sprite?.startMotion({ group: 'TapBody', no: 0, priority: Priority.Normal })
+      }
+    })
+  } catch (e) {
+    console.warn('Live2D init failed, using CSS fallback', e)
+    webglFailed.value = true
+  }
+})
 
 onUnmounted(() => {
   currentRunId++
   stopFallbackAudio()
+  sprite?.destroy()
+  if (app) {
+    app.destroy(true, { children: true })
+    app = null
+  }
 })
 
 async function playVoice(blob: Blob, runId: number) {
   currentRunId = runId
-  isSpeaking.value = true
-  await playAudioFallback(blob, runId)
+  const url = URL.createObjectURL(blob)
+
+  if (sprite && loaded.value && !webglFailed.value) {
+    try {
+      isSpeaking.value = true
+      await sprite.playVoice({ voicePath: url, immediate: true })
+    } finally {
+      if (runId === currentRunId) isSpeaking.value = false
+      URL.revokeObjectURL(url)
+    }
+  } else {
+    try {
+      isSpeaking.value = true
+      await playAudioFallback(url, runId)
+    } finally {
+      if (runId === currentRunId) isSpeaking.value = false
+      URL.revokeObjectURL(url)
+    }
+  }
 }
 
 function stopVoice() {
   currentRunId++
+  sprite?.stopVoice()
   stopFallbackAudio()
   isSpeaking.value = false
 }
 
-let fallbackAudio: HTMLAudioElement | null = null
+function triggerExpression(name: string) {
+  sprite?.setExpression({ expressionId: name })
+}
 
-async function playAudioFallback(blob: Blob, runId: number) {
-  const url = URL.createObjectURL(blob)
-  try {
-    fallbackAudio = new Audio(url)
-    await new Promise<void>((resolve, reject) => {
-      if (!fallbackAudio) { resolve(); return }
-      fallbackAudio.onended = () => resolve()
-      fallbackAudio.onerror = () => reject()
-      fallbackAudio.play().catch(reject)
-    })
-  } finally {
-    if (runId === currentRunId) isSpeaking.value = false
-    URL.revokeObjectURL(url)
-  }
+async function playAudioFallback(url: string, runId: number) {
+  fallbackAudio = new Audio(url)
+  await new Promise<void>((resolve, reject) => {
+    if (!fallbackAudio) { resolve(); return }
+    fallbackAudio.onended = () => resolve()
+    fallbackAudio.onerror = () => reject()
+    fallbackAudio.play().catch(reject)
+  })
 }
 
 function stopFallbackAudio() {
@@ -50,29 +123,36 @@ function stopFallbackAudio() {
   }
 }
 
-defineExpose({ playVoice, stopVoice, isSpeaking })
+defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
 </script>
 
 <template>
-  <div class="digital-human-container">
-    <div class="fallback-avatar">
-      <div class="halo" :class="{ speaking: speaking || isSpeaking }"></div>
-      <div class="avatar-card">
-        <div class="avatar-circle" :class="{ speaking: speaking || isSpeaking }">
-          <span>AI</span>
-        </div>
-        <p class="name">小导</p>
-        <p class="status">{{ speaking || isSpeaking ? '正在语音导览' : '等待播放导览' }}</p>
-        <div class="voice-bars" :class="{ active: speaking || isSpeaking }">
-          <i></i><i></i><i></i><i></i><i></i>
+  <div class="live2d-wrapper" ref="wrapperRef">
+    <canvas ref="canvasRef" v-show="loaded && !webglFailed" class="live2d-canvas" />
+    <div v-if="!loaded && !webglFailed" class="live2d-loading">
+      <span class="dot-pulse"></span>
+    </div>
+
+    <template v-if="!loaded || webglFailed">
+      <div class="fallback-avatar">
+        <div class="halo" :class="{ speaking: speaking || isSpeaking }"></div>
+        <div class="avatar-card">
+          <div class="avatar-circle" :class="{ speaking: speaking || isSpeaking }">
+            <span>AI</span>
+          </div>
+          <p class="name">小导</p>
+          <p class="status">{{ speaking || isSpeaking ? '正在语音导览' : '等待播放导览' }}</p>
+          <div class="voice-bars" :class="{ active: speaking || isSpeaking }">
+            <i></i><i></i><i></i><i></i><i></i>
+          </div>
         </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.digital-human-container {
+.live2d-wrapper {
   position: relative;
   width: 100%;
   height: 100%;
@@ -83,6 +163,34 @@ defineExpose({ playVoice, stopVoice, isSpeaking })
   overflow: hidden;
 }
 
+.live2d-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.live2d-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dot-pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #6f9b72;
+  animation: dotPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* ---- CSS fallback ---- */
 .fallback-avatar {
   position: relative;
   width: 100%;
