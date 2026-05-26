@@ -141,6 +141,12 @@ docker-compose up -d
 
 ## 更新日志
 
+### 2026-05-27-V6
+
+- **Live2D 响应式定位** — 添加 `ResizeObserver` 监听容器尺寸变化，同步更新 sprite 的 `x`（居中）、`y`（底部偏移）、`width`（宽度填充），确保切换设备和窗口缩放时模型位置比例不变
+- **上半身构图** — `sprite.y = 容器高度 × 1.45`，配合 `anchor(0.5, 1)` 底部中心锚点 + `overflow:hidden`，裁剪下半身只露上半身，模型紧贴底部信息卡片形成连贯视觉
+- **左侧面板 UI 优化** — 数字人区域去重阴影改淡渐变背景（`linear-gradient`），guide-card 缩小边距/圆角/字号（14px padding、18px 圆角），整体更轻盈紧凑
+
 ### 2026-05-27-V5
 
 - **Live2D 数字人（Hiyori）成功接入并正常渲染** — 模型路径统一为 `/Resources/Hiyori/`（对齐 Knowledge_Agent 工程），Pixi.js + easy-live2d 初始化流程参照官方 Vue3 示例重写，去掉多余的 anchor/xy 手动定位
