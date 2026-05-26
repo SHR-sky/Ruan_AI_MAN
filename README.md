@@ -110,6 +110,11 @@ docker-compose up -d
 ├── esp32_sample/         # ESP32 硬件示例代码 + API 文档
 │   ├── scenic_guide_esp32.ino  # 完整 Arduino 示例
 │   └── API.md            # 设备 API 文档
+├── finetune_dataset/     # 模型微调数据集（3 种风格 × 621 条对话记录）
+│   ├── enthusiastic_local_guide.jsonl  # 热情本地通
+│   ├── learned_history_scholar.jsonl   # 博学文史官
+│   ├── cute_cartoon.jsonl              # 萌趣卡通
+│   └── generate_dataset.py             # 数据生成脚本
 ├── docker-compose.yml    # 容器编排
 └── 项目文档/                  # 开题报告、项目介绍等
 ```
@@ -135,6 +140,15 @@ docker-compose up -d
 ---
 
 ## 更新日志
+
+### 2026-05-26-V3
+
+- **新增三种导游风格微调数据集** — 在 `finetune_dataset/` 下创建 3 个 JSONL 文件，每个包含 621 条 `messages` 格式对话记录（共 1,863 条），用于对 LLM 进行风格化指令微调
+- **热情本地通**（`enthusiastic_local_guide.jsonl`）— 设定为"本地通小张"角色，语气活泼、充满感染力，常以"咱这儿啊……"开头，推荐小众玩法和私房路线，适合偏好地道体验的游客
+- **博学文史官**（`learned_history_scholar.jsonl`）— 设定为"文史老学究"角色，语气稳重端庄、引经据典（《诗经》《中庸》《礼记》等），以"诸位请看…""且听我道来…"开篇，适合深度文化游群体
+- **萌趣卡通**（`cute_cartoon.jsonl`）— 设定为"小云朵"卡通导游角色，大量使用 emoji 表情（✨🌈🎵🚀）、拟人化表达（大树伯伯、小河姐姐、太阳公公），适合亲子家庭游客
+- **数据覆盖全面** — 每条数据包含 system / user / assistant 三端消息，覆盖项目知识库 23 个景区 × 27 种问法类型（位置、门票、交通、亲子、美食、历史、路线推荐、拍照打卡等），景区涵盖上海、江苏、浙江三地核心景点
+- **可扩展生成脚本** — 保留 `generate_dataset.py`，支持随时扩展更多景区或问法模板重新生成
 
 ### 2026-05-26-V2
 
