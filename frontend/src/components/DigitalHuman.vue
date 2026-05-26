@@ -21,6 +21,7 @@ let currentRunId = 0
 let fallbackAudio: HTMLAudioElement | null = null
 let activeSource: AudioBufferSourceNode | null = null
 let activeAudioCtx: AudioContext | null = null
+let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
   if (!canvasRef.value) return
@@ -54,6 +55,15 @@ onMounted(async () => {
       loaded.value = true
       sprite?.startRandomMotion({ group: 'Idle', priority: Priority.Idle })
     })
+
+    if (wrapperRef.value) {
+      resizeObserver = new ResizeObserver(() => {
+        if (sprite && canvasRef.value) {
+          sprite.width = canvasRef.value.clientWidth
+        }
+      })
+      resizeObserver.observe(wrapperRef.value)
+    }
   } catch (e) {
     clearTimeout(timeout)
     console.warn('[Live2D] init failed:', e)
@@ -63,6 +73,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   currentRunId++
+  resizeObserver?.disconnect()
   stopFallbackAudio()
   sprite?.destroy()
   if (app) {
