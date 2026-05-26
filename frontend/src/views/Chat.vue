@@ -300,45 +300,53 @@ function handleVoiceResult(text: string) {
 .digital-human-area,
 .chat-area {
   min-height: 0;
-  border: 1px solid rgba(58, 80, 64, 0.14);
   border-radius: 28px;
-  background: rgba(255, 252, 244, 0.72);
-  box-shadow: 0 22px 70px rgba(55, 74, 54, 0.14);
 }
 
 .digital-human-area {
   display: grid;
   grid-template-rows: 1fr auto;
   overflow: hidden;
+  background: linear-gradient(180deg, rgba(255,252,244,0.4) 0%, rgba(255,252,244,0.8) 100%);
+  border: 1px solid rgba(58, 80, 64, 0.1);
+  box-shadow: 0 4px 24px rgba(55, 74, 54, 0.08);
+}
+
+.chat-area {
+  border: 1px solid rgba(58, 80, 64, 0.14);
+  background: rgba(255, 252, 244, 0.72);
+  box-shadow: 0 22px 70px rgba(55, 74, 54, 0.14);
 }
 
 .guide-card {
-  margin: 0 22px 22px;
-  padding: 20px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(58, 80, 64, 0.12);
+  margin: 0 16px 16px;
+  padding: 14px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(58, 80, 64, 0.08);
+  backdrop-filter: blur(8px);
 }
 
 .tag {
   display: inline-flex;
-  padding: 5px 10px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: #dbe8ce;
   color: #50623b;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .guide-card h2 {
-  margin: 12px 0 8px;
-  font-size: 24px;
+  margin: 8px 0 4px;
+  font-size: 20px;
 }
 
 .guide-card p {
   margin: 0;
   color: #526257;
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .audio-alert {
@@ -409,7 +417,7 @@ function handleVoiceResult(text: string) {
   }
 
   .digital-human-area {
-    min-height: 520px;
+    min-height: 480px;
   }
 }
 </style>

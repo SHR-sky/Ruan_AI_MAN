@@ -49,8 +49,8 @@ onMounted(async () => {
 
     sprite.anchor.set(0.5, 1)
     sprite.x = canvasRef.value.clientWidth / 2
-    sprite.y = canvasRef.value.clientHeight
-    sprite.width = canvasRef.value.clientWidth * 1.2
+    sprite.y = canvasRef.value.clientHeight * 1.45
+    sprite.width = canvasRef.value.clientWidth * 1.1
     app.stage.addChild(sprite)
 
     sprite.onLive2D('ready', () => {
@@ -64,9 +64,9 @@ onMounted(async () => {
         if (sprite && canvasRef.value) {
           const w = canvasRef.value.clientWidth
           const h = canvasRef.value.clientHeight
-          sprite.width = w * 1.2
+          sprite.width = w * 1.1
           sprite.x = w / 2
-          sprite.y = h
+          sprite.y = h * 1.45
         }
       })
       resizeObserver.observe(wrapperRef.value)
