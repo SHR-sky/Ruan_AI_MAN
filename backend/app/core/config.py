@@ -27,6 +27,9 @@ class Settings(BaseSettings):
 
     ASR_MODEL: str = "whisper-1"
 
+    # LLM 配置
+    LLM_MODEL_PATH: str = ""
+
     # TTS 配置
     TTS_VOICE: str = "female"
     TTS_DEVICE: str = "auto"

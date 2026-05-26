@@ -146,34 +146,53 @@ class RAGService:
         if not query or not query.strip():
             return "请问您想了解什么？"
 
-        named_item = self._find_item_by_name(query)
-        if named_item:
-            return named_item.get("content", "")
+        from app.services.llm import LLMService
+        llm = LLMService()
 
-        # 1. FAQ exact match first
-        faq_match = self._search_faq(query)
-        if faq_match:
-            return faq_match["answer"]
-
-        # 2. Keyword search in knowledge base
         results = self._keyword_search(query, top_k=3)
+
         if results:
-            best = results[0]
-            # If name matches, return a structured answer
-            name = best.get("name", "")
-            if name and any(term in query for term in [name, name[:2]]):
-                return best["content"]
-
-            # General answer with top results
-            answer_parts = [f"为您找到以下相关信息："]
+            context_parts = []
             for r in results:
-                snippet = r["content"][:200]
-                answer_parts.append(f"\n▶ {r['name']}：{snippet}")
-            return "\n".join(answer_parts)
+                context_parts.append(f"【{r['name']}】（{r['type']}）\n{r['content'][:500]}")
+            context = "\n\n".join(context_parts)
 
-        # 3. Fallback
-        return (f"关于「{query}」，我暂时没有找到准确的资料。"
-                f"请尝试换一个问法，或者前往景区游客中心咨询。")
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是一个景区导览AI助手。请根据以下参考资料，用简洁自然的口吻回答游客的问题。"
+                        "要求：1）用自己的话总结，不要直接复制原文；"
+                        "2）控制在200字以内；"
+                        "3）回答要友好热情，像导游在介绍。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"参考资料：\n{context}\n\n游客问：{query}\n\n请回答：",
+                },
+            ]
+        else:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "你是一个景区导览AI助手。游客的问题超出你的知识范围，请礼貌告知暂时没有相关信息，并建议游客咨询游客中心或换个问题试试。",
+                },
+                {
+                    "role": "user",
+                    "content": f"游客问：{query}\n\n请回答：",
+                },
+            ]
+
+        try:
+            response = await llm.chat(messages)
+            return response["content"]
+        except Exception as exc:
+            print(f"[RAG] LLM generate failed: {exc}")
+            if results:
+                return results[0]["content"][:300]
+            return (f"关于「{query}」，我暂时没有找到准确的资料。"
+                    f"请尝试换一个问法，或者前往景区游客中心咨询。")
 
     async def search(self, query: str, top_k: int = 5) -> list:
         self._ensure_loaded()

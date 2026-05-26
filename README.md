@@ -136,6 +136,15 @@ docker-compose up -d
 
 ## 更新日志
 
+### 2026-05-26-V2
+
+- **接入 Qwen3.5-0.8B GGUF 本地大模型** — 将 `Qwen3.5-0.8B-IQ4_NL.gguf` 移至 `models/`，安装 `llama-cpp-python`（CUDA 12.4 预编译 whl，兼容 12.6），GPU 全层加载，实现纯本地 LLM 推理
+- **LLM 服务重写** — `LLMService` 从桩代码重写为基于 `llama_cpp.Llama` 的单例服务，提供 `chat()` / `chat_stream()`，模型路径通过 `LLM_MODEL_PATH` 配置（默认 `models/Qwen3.5-0.8B-IQ4_NL.gguf`）
+- **RAG 管道升级：LLM 总结式回答** — `RAGService.generate()` 改为：关键词检索 → 构建上下文 → Qwen 阅读后以自然口吻总结输出（≤200 字、不直接复制原文），达到"导游用自己话介绍"的效果；LLM 故障时自动降级返回原始内容前 300 字
+- **RAG 兜底策略** — 无匹配知识时，LLM 礼貌告知无相关信息并建议咨询游客中心，替代原有硬编码模板
+- **依赖更新** — `requirements.txt` 新增 `llama-cpp-python>=0.3.0`，`config.py` 新增 `LLM_MODEL_PATH` 配置项
+- **验证脚本** — `scripts/verify_tts/test_qwen_rag.py` 可直接运行验证 RAG+LLM 全链路
+
 ### 2026-05-26
 
 - **TTS 引擎更换为 Kokoro-82M** — 统一使用 `KokoroTTSEngine`，基于 `kokoro` 包（KPipeline + KModel）驱动，模型文件存放于 `models/kokoro/`（config.json + kokoro-v1_0.pth + voices/*.pt）
