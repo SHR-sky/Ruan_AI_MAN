@@ -18,6 +18,14 @@ let fallbackAudio: HTMLAudioElement | null = null
 
 onMounted(async () => {
   await nextTick()
+
+  const timeout = setTimeout(() => {
+    if (!loaded.value) {
+      console.warn('Live2D model load timeout, using CSS fallback')
+      webglFailed.value = true
+    }
+  }, 10000)
+
   try {
     Config.MotionGroupIdle = 'Idle'
     Config.MouseFollow = false
@@ -46,6 +54,7 @@ onMounted(async () => {
     app.stage.addChild(sprite)
 
     sprite.onLive2D('ready', () => {
+      clearTimeout(timeout)
       loaded.value = true
       sprite?.startRandomMotion({ group: 'Idle', priority: Priority.Idle })
     })
@@ -56,6 +65,7 @@ onMounted(async () => {
       }
     })
   } catch (e) {
+    clearTimeout(timeout)
     console.warn('Live2D init failed, using CSS fallback', e)
     webglFailed.value = true
   }
@@ -129,25 +139,24 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
 <template>
   <div class="live2d-wrapper" ref="wrapperRef">
     <canvas ref="canvasRef" v-show="loaded && !webglFailed" class="live2d-canvas" />
+
     <div v-if="!loaded && !webglFailed" class="live2d-loading">
       <span class="dot-pulse"></span>
     </div>
 
-    <template v-if="!loaded || webglFailed">
-      <div class="fallback-avatar">
-        <div class="halo" :class="{ speaking: speaking || isSpeaking }"></div>
-        <div class="avatar-card">
-          <div class="avatar-circle" :class="{ speaking: speaking || isSpeaking }">
-            <span>AI</span>
-          </div>
-          <p class="name">小导</p>
-          <p class="status">{{ speaking || isSpeaking ? '正在语音导览' : '等待播放导览' }}</p>
-          <div class="voice-bars" :class="{ active: speaking || isSpeaking }">
-            <i></i><i></i><i></i><i></i><i></i>
-          </div>
+    <div v-if="webglFailed" class="fallback-avatar">
+      <div class="halo" :class="{ speaking: speaking || isSpeaking }"></div>
+      <div class="avatar-card">
+        <div class="avatar-circle" :class="{ speaking: speaking || isSpeaking }">
+          <span>AI</span>
+        </div>
+        <p class="name">小导</p>
+        <p class="status">{{ speaking || isSpeaking ? '正在语音导览' : '等待播放导览' }}</p>
+        <div class="voice-bars" :class="{ active: speaking || isSpeaking }">
+          <i></i><i></i><i></i><i></i><i></i>
         </div>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
