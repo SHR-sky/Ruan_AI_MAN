@@ -1,18 +1,142 @@
 <script setup lang="ts">
-defineProps<{ speaking?: boolean }>()
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { Config, Live2DSprite, Priority } from 'easy-live2d'
+import { Application, Ticker } from 'pixi.js'
+
+const props = defineProps<{ speaking?: boolean }>()
+
+const canvasRef = ref<HTMLCanvasElement | null>(null)
+const live2dReady = ref(false)
+const webglFailed = ref(false)
+const isSpeaking = ref(false)
+
+let app: Application | null = null
+let sprite: Live2DSprite | null = null
+let currentRunId = 0
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(async () => {
+  try {
+    Config.MotionGroupIdle = 'Idle'
+    Config.MouseFollow = false
+
+    app = new Application()
+    sprite = new Live2DSprite({
+      modelPath: '/live2d-models/Hiyori/Hiyori.model3.json',
+      ticker: Ticker.shared,
+      draggable: false,
+    })
+
+    if (canvasRef.value) {
+      await app.init({
+        canvas: canvasRef.value,
+        backgroundAlpha: 0,
+        autoDensity: true,
+        resolution: Math.max(window.devicePixelRatio || 1, 1),
+      })
+      sprite.width = canvasRef.value.clientWidth
+      app.stage.addChild(sprite)
+
+      sprite.onLive2D('ready', () => {
+        live2dReady.value = true
+        sprite?.startRandomMotion({ group: 'Idle', priority: Priority.Idle })
+      })
+    }
+
+    resizeObserver = new ResizeObserver(() => {
+      if (canvasRef.value && sprite) {
+        sprite.width = canvasRef.value.clientWidth
+        sprite.height = canvasRef.value.clientHeight
+      }
+    })
+    if (canvasRef.value?.parentElement) {
+      resizeObserver.observe(canvasRef.value.parentElement)
+    }
+  } catch (e) {
+    console.warn('Live2D init failed, using CSS fallback', e)
+    webglFailed.value = true
+  }
+})
+
+onUnmounted(() => {
+  resizeObserver?.disconnect()
+  currentRunId++
+  sprite?.destroy()
+  if (app) {
+    app.destroy(true)
+    app = null
+  }
+})
+
+async function playVoice(blob: Blob, runId: number) {
+  currentRunId = runId
+  if (!sprite || !live2dReady.value) {
+    isSpeaking.value = true
+    await playAudioFallback(blob, runId)
+    return
+  }
+  const url = URL.createObjectURL(blob)
+  try {
+    isSpeaking.value = true
+    await sprite.playVoice({ voicePath: url, immediate: true })
+  } finally {
+    if (runId === currentRunId) {
+      isSpeaking.value = false
+    }
+    URL.revokeObjectURL(url)
+  }
+}
+
+function stopVoice() {
+  currentRunId++
+  sprite?.stopVoice()
+  stopFallbackAudio()
+  isSpeaking.value = false
+}
+
+let fallbackAudio: HTMLAudioElement | null = null
+
+async function playAudioFallback(blob: Blob, runId: number) {
+  const url = URL.createObjectURL(blob)
+  try {
+    fallbackAudio = new Audio(url)
+    await new Promise<void>((resolve, reject) => {
+      if (!fallbackAudio) { resolve(); return }
+      fallbackAudio.onended = () => resolve()
+      fallbackAudio.onerror = () => reject()
+      fallbackAudio.play().catch(reject)
+    })
+  } finally {
+    if (runId === currentRunId) isSpeaking.value = false
+    URL.revokeObjectURL(url)
+  }
+}
+
+function stopFallbackAudio() {
+  if (fallbackAudio) {
+    fallbackAudio.pause()
+    fallbackAudio.currentTime = 0
+    fallbackAudio = null
+  }
+}
+
+defineExpose({ playVoice, stopVoice, isSpeaking })
 </script>
 
 <template>
   <div class="digital-human-container">
-    <div class="halo" :class="{ speaking }"></div>
-    <div class="avatar-card">
-      <div class="avatar-circle" :class="{ speaking }">
-        <span>AI</span>
-      </div>
-      <p class="name">小导</p>
-      <p class="status">{{ speaking ? '正在语音导览' : '等待播放导览' }}</p>
-      <div class="voice-bars" :class="{ active: speaking }">
-        <i></i><i></i><i></i><i></i><i></i>
+    <canvas ref="canvasRef" v-show="live2dReady && !webglFailed" class="live2d-canvas" />
+    <div v-show="!live2dReady || webglFailed" class="fallback-avatar">
+      <div class="halo" :class="{ speaking: speaking || isSpeaking }"></div>
+      <div class="avatar-card">
+        <div class="avatar-circle" :class="{ speaking: speaking || isSpeaking }">
+          <span>AI</span>
+        </div>
+        <p class="name">小导</p>
+        <p class="status">{{ speaking || isSpeaking ? '正在语音导览' : '等待播放导览' }}</p>
+        <div class="voice-bars" :class="{ active: speaking || isSpeaking }">
+          <i></i><i></i><i></i><i></i><i></i>
+        </div>
       </div>
     </div>
   </div>
@@ -28,6 +152,21 @@ defineProps<{ speaking?: boolean }>()
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+
+.live2d-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.fallback-avatar {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .halo {

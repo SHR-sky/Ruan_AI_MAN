@@ -19,9 +19,9 @@ const audioLoading = ref(false)
 const autoplayBlocked = ref(false)
 const audioError = ref('')
 const audioRef = ref<HTMLAudioElement | null>(null)
-const objectAudioUrl = ref('')
 const ttsDevice = ref('')
 let speechRunId = 0
+const dhRef = ref<any>(null)
 
 onMounted(async () => {
   await loadIntro()
@@ -29,9 +29,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopAudio()
-  if (objectAudioUrl.value) {
-    URL.revokeObjectURL(objectAudioUrl.value)
-  }
 })
 
 async function loadIntro() {
@@ -62,6 +59,7 @@ function stopAudio() {
     audioRef.value.pause()
     audioRef.value.currentTime = 0
   }
+  dhRef.value?.stopVoice()
   isPlaying.value = false
 }
 
@@ -117,12 +115,12 @@ async function playAssistantAnswer(text: string) {
   const speechText = normalizeSpeechText(text)
   if (!speechText) return
 
+  const runId = ++speechRunId
   try {
     audioError.value = ''
     if (isPlaying.value) {
       stopAudio()
     }
-    const runId = ++speechRunId
     audioLoading.value = true
     const res = await api.post(
       '/tts/synthesize-file',
@@ -130,48 +128,21 @@ async function playAssistantAnswer(text: string) {
       { responseType: 'blob' },
     )
     if (runId !== speechRunId) return
-    if (objectAudioUrl.value) {
-      URL.revokeObjectURL(objectAudioUrl.value)
-    }
-    objectAudioUrl.value = URL.createObjectURL(res.data)
-    await playAudioAndWait(objectAudioUrl.value, runId)
-  } catch {
-    isPlaying.value = false
     audioLoading.value = false
+    isPlaying.value = true
+    await dhRef.value?.playVoice(res.data, runId)
+  } catch {
     audioError.value = '回答语音生成失败，请确认后端 TTS 服务可用。'
+  } finally {
+    if (runId === speechRunId) {
+      isPlaying.value = false
+      audioLoading.value = false
+    }
   }
 }
 
 function normalizeSpeechText(text: string) {
   return text.replace(/\s+/g, ' ').trim()
-}
-
-async function playAudioAndWait(source: string, runId: number) {
-  const audio = audioRef.value ?? new Audio()
-  audioRef.value = audio
-  audio.preload = 'auto'
-  audio.src = source
-
-  await new Promise<void>((resolve, reject) => {
-    audio.onplaying = () => {
-      if (runId !== speechRunId) {
-        resolve()
-        return
-      }
-      isPlaying.value = true
-      audioLoading.value = false
-    }
-    audio.onended = () => {
-      isPlaying.value = false
-      audioLoading.value = false
-      resolve()
-    }
-    audio.onpause = () => {
-      if (runId !== speechRunId) resolve()
-    }
-    audio.onerror = () => reject(new Error('audio playback failed'))
-    audio.play().catch(reject)
-  })
 }
 
 async function sendText() {
@@ -212,7 +183,7 @@ function handleVoiceResult(text: string) {
 
     <main class="chat-main">
       <section class="digital-human-area">
-        <DigitalHuman :speaking="isPlaying" />
+        <DigitalHuman ref="dhRef" :speaking="isPlaying" />
         <div class="guide-card">
           <span class="tag">{{ introType || '知识库导览' }}</span>
           <h2>{{ introName || '正在加载景点' }}</h2>
