@@ -12,6 +12,8 @@ _BIG_UNIT_MAP = ["", "万", "亿", "万亿"]
 def _small_number_to_cn(num_str: str) -> str:
     if num_str == "0":
         return "零"
+    if len(num_str) > len(_UNIT_MAP):
+        return "".join(_NUMBER_MAP.get(d, d) for d in num_str)
     digits = list(num_str)
     length = len(digits)
     result = ""

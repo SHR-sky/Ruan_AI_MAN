@@ -1,95 +1,25 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { Config, Live2DSprite, Priority } from 'easy-live2d'
-import { Application, Ticker } from 'pixi.js'
+import { ref, onUnmounted } from 'vue'
 
 const props = defineProps<{ speaking?: boolean }>()
 
-const canvasRef = ref<HTMLCanvasElement | null>(null)
-const live2dReady = ref(false)
-const webglFailed = ref(false)
 const isSpeaking = ref(false)
 
-let app: Application | null = null
-let sprite: Live2DSprite | null = null
 let currentRunId = 0
-let resizeObserver: ResizeObserver | null = null
-
-onMounted(async () => {
-  try {
-    Config.MotionGroupIdle = 'Idle'
-    Config.MouseFollow = false
-
-    app = new Application()
-    sprite = new Live2DSprite({
-      modelPath: '/live2d-models/Hiyori/Hiyori.model3.json',
-      ticker: Ticker.shared,
-      draggable: false,
-    })
-
-    if (canvasRef.value) {
-      await app.init({
-        canvas: canvasRef.value,
-        backgroundAlpha: 0,
-        autoDensity: true,
-        resolution: Math.max(window.devicePixelRatio || 1, 1),
-      })
-      sprite.width = canvasRef.value.clientWidth
-      app.stage.addChild(sprite)
-
-      sprite.onLive2D('ready', () => {
-        live2dReady.value = true
-        sprite?.startRandomMotion({ group: 'Idle', priority: Priority.Idle })
-      })
-    }
-
-    resizeObserver = new ResizeObserver(() => {
-      if (canvasRef.value && sprite) {
-        sprite.width = canvasRef.value.clientWidth
-        sprite.height = canvasRef.value.clientHeight
-      }
-    })
-    if (canvasRef.value?.parentElement) {
-      resizeObserver.observe(canvasRef.value.parentElement)
-    }
-  } catch (e) {
-    console.warn('Live2D init failed, using CSS fallback', e)
-    webglFailed.value = true
-  }
-})
 
 onUnmounted(() => {
-  resizeObserver?.disconnect()
   currentRunId++
-  sprite?.destroy()
-  if (app) {
-    app.destroy(true)
-    app = null
-  }
+  stopFallbackAudio()
 })
 
 async function playVoice(blob: Blob, runId: number) {
   currentRunId = runId
-  if (!sprite || !live2dReady.value) {
-    isSpeaking.value = true
-    await playAudioFallback(blob, runId)
-    return
-  }
-  const url = URL.createObjectURL(blob)
-  try {
-    isSpeaking.value = true
-    await sprite.playVoice({ voicePath: url, immediate: true })
-  } finally {
-    if (runId === currentRunId) {
-      isSpeaking.value = false
-    }
-    URL.revokeObjectURL(url)
-  }
+  isSpeaking.value = true
+  await playAudioFallback(blob, runId)
 }
 
 function stopVoice() {
   currentRunId++
-  sprite?.stopVoice()
   stopFallbackAudio()
   isSpeaking.value = false
 }
@@ -125,8 +55,7 @@ defineExpose({ playVoice, stopVoice, isSpeaking })
 
 <template>
   <div class="digital-human-container">
-    <canvas ref="canvasRef" v-show="live2dReady && !webglFailed" class="live2d-canvas" />
-    <div v-show="!live2dReady || webglFailed" class="fallback-avatar">
+    <div class="fallback-avatar">
       <div class="halo" :class="{ speaking: speaking || isSpeaking }"></div>
       <div class="avatar-card">
         <div class="avatar-circle" :class="{ speaking: speaking || isSpeaking }">
@@ -152,12 +81,6 @@ defineExpose({ playVoice, stopVoice, isSpeaking })
   align-items: center;
   justify-content: center;
   overflow: hidden;
-}
-
-.live2d-canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
 }
 
 .fallback-avatar {

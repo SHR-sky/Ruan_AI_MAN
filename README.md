@@ -141,6 +141,13 @@ docker-compose up -d
 
 ## 更新日志
 
+### 2026-05-27-V4
+
+- **修复 text_utils 数字转中文越界 BUG** — `_small_number_to_cn()` 在处理超过 4 位数字段时索引越界导致 RAG 服务崩溃；新增长度守卫，超长数字直接逐位映射，避免 IndexError
+- **前端代理端口修正** — `frontend/vite.config.ts` 和 `admin/vite.config.ts` 代理目标从 `127.0.0.1:8000` 改为 `127.0.0.1:8001`，与后端实际端口保持一致
+- **清理后端 __pycache__ 缓存** — 删除残留 `.pyc` 文件，解决因缓存导致的旧路由注册与源码不匹配的问题（如 `/health` 返回内容与代码不一致）
+- **回退 Live2D 数字人至 CSS 头像** — easy-live2d + Pixi.js 集成存在 WebGL / Core SDK 加载兼容性问题，暂时回退到纯 CSS 绿色圆形头像（保留数字人组件接口，待后续稳定后再接入 Live2D）
+
 ### 2026-05-26-V3
 
 - **新增三种导游风格微调数据集** — 在 `finetune_dataset/` 下创建 3 个 JSONL 文件，每个包含 621 条 `messages` 格式对话记录（共 1,863 条），用于对 LLM 进行风格化指令微调
