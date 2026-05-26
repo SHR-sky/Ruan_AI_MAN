@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { Application, Ticker } from 'pixi.js'
 import { Config, Live2DSprite, Priority, LogLevel } from 'easy-live2d'
 
@@ -11,69 +11,50 @@ const loaded = ref(false)
 const webglFailed = ref(false)
 const isSpeaking = ref(false)
 
+Config.MotionGroupIdle = 'Idle'
+Config.MouseFollow = false
+Config.CubismLoggingLevel = LogLevel.LogLevel_Error
+
 let app: Application | null = null
 let sprite: Live2DSprite | null = null
 let currentRunId = 0
 let fallbackAudio: HTMLAudioElement | null = null
 
 onMounted(async () => {
-  await nextTick()
-  console.log('[Live2D] mount start, wrapper size:', wrapperRef.value?.clientWidth, 'x', wrapperRef.value?.clientHeight)
+  if (!canvasRef.value) return
 
   const timeout = setTimeout(() => {
     if (!loaded.value) {
-      console.warn('[Live2D] model load timeout (10s), using CSS fallback')
       webglFailed.value = true
     }
   }, 10000)
 
   try {
-    console.log('[Live2D] setting Config...')
-    Config.MotionGroupIdle = 'Idle'
-    Config.MouseFollow = false
-    Config.CubismLoggingLevel = LogLevel.LogLevel_Error
-
-    console.log('[Live2D] creating Pixi Application...')
     app = new Application()
     await app.init({
-      canvas: canvasRef.value!,
+      canvas: canvasRef.value,
       backgroundAlpha: 0,
       autoDensity: true,
-      antialias: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      resolution: Math.max(window.devicePixelRatio || 1, 1),
       resizeTo: wrapperRef.value!,
     })
-    console.log('[Live2D] Pixi app init done, canvas:', canvasRef.value?.clientWidth, 'x', canvasRef.value?.clientHeight)
 
-    console.log('[Live2D] creating Live2DSprite...')
     sprite = new Live2DSprite({
       modelPath: '/Resources/Hiyori/Hiyori.model3.json',
       ticker: Ticker.shared,
     })
 
-    sprite.anchor.set(0.5, 1)
-    sprite.x = canvasRef.value!.clientWidth / 2
-    sprite.y = canvasRef.value!.clientHeight
-    sprite.width = canvasRef.value!.clientWidth * 1.2
-    console.log('[Live2D] sprite created, waiting for ready...')
-
+    sprite.width = canvasRef.value.clientWidth
     app.stage.addChild(sprite)
 
     sprite.onLive2D('ready', () => {
       clearTimeout(timeout)
       loaded.value = true
-      console.log('[Live2D] MODEL READY!')
       sprite?.startRandomMotion({ group: 'Idle', priority: Priority.Idle })
-    })
-
-    sprite.onLive2D('hit', async ({ hitAreaName }) => {
-      if (hitAreaName === 'Body') {
-        await sprite?.startMotion({ group: 'TapBody', no: 0, priority: Priority.Normal })
-      }
     })
   } catch (e) {
     clearTimeout(timeout)
-    console.warn('[Live2D] init failed, using CSS fallback:', e)
+    console.warn('[Live2D] init failed:', e)
     webglFailed.value = true
   }
 })
@@ -145,7 +126,7 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
 
 <template>
   <div class="live2d-wrapper" ref="wrapperRef">
-    <canvas ref="canvasRef" v-show="loaded && !webglFailed" class="live2d-canvas" />
+    <canvas ref="canvasRef" class="live2d-canvas" />
 
     <div v-if="!loaded && !webglFailed" class="live2d-loading">
       <span class="dot-pulse"></span>
@@ -167,7 +148,7 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
     </div>
 
     <div class="debug-status">
-      loaded={{ loaded }} webglFailed={{ webglFailed }} wrapper={{ wrapperRef?.clientWidth }}x{{ wrapperRef?.clientHeight }} canvas={{ canvasRef?.clientWidth }}x{{ canvasRef?.clientHeight }}
+      loaded={{ loaded }} webglFailed={{ webglFailed }} w={{ wrapperRef?.clientWidth }}x{{ wrapperRef?.clientHeight }} c={{ canvasRef?.clientWidth }}x{{ canvasRef?.clientHeight }}
     </div>
   </div>
 </template>
@@ -178,9 +159,6 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
   width: 100%;
   height: 100%;
   min-height: 330px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
 }
 
@@ -188,7 +166,6 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
   width: 100%;
   height: 100%;
   display: block;
-  background: rgba(255, 0, 0, 0.05);
 }
 
 .live2d-loading {
@@ -199,6 +176,14 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+.dot-pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #6f9b72;
+  animation: dotPulse 1.2s ease-in-out infinite;
 }
 
 .debug-label {
@@ -217,15 +202,6 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
   font-size: 10px;
   font-family: monospace;
   z-index: 10;
-  white-space: nowrap;
-}
-
-.dot-pulse {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #6f9b72;
-  animation: dotPulse 1.2s ease-in-out infinite;
 }
 
 @keyframes dotPulse {
@@ -235,9 +211,8 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
 
 /* ---- CSS fallback ---- */
 .fallback-avatar {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
