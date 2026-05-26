@@ -19,6 +19,8 @@ let app: Application | null = null
 let sprite: Live2DSprite | null = null
 let currentRunId = 0
 let fallbackAudio: HTMLAudioElement | null = null
+let activeSource: AudioBufferSourceNode | null = null
+let activeAudioCtx: AudioContext | null = null
 
 onMounted(async () => {
   if (!canvasRef.value) return
@@ -71,17 +73,9 @@ onUnmounted(() => {
 
 async function playVoice(blob: Blob, runId: number) {
   currentRunId = runId
-  const url = URL.createObjectURL(blob)
 
-  if (sprite && loaded.value && !webglFailed.value) {
-    try {
-      isSpeaking.value = true
-      await sprite.playVoice({ voicePath: url, immediate: true })
-    } finally {
-      if (runId === currentRunId) isSpeaking.value = false
-      URL.revokeObjectURL(url)
-    }
-  } else {
+  if (!sprite || !loaded.value || webglFailed.value) {
+    const url = URL.createObjectURL(blob)
     try {
       isSpeaking.value = true
       await playAudioFallback(url, runId)
@@ -89,12 +83,74 @@ async function playVoice(blob: Blob, runId: number) {
       if (runId === currentRunId) isSpeaking.value = false
       URL.revokeObjectURL(url)
     }
+    return
   }
+
+  try {
+    isSpeaking.value = true
+    await playWithManualLipSync(blob, runId)
+  } finally {
+    if (runId === currentRunId) {
+      isSpeaking.value = false
+      sprite?.setParameterValueById('ParamMouthOpenY', 0)
+    }
+  }
+}
+
+async function playWithManualLipSync(blob: Blob, runId: number) {
+  const audioCtx = new AudioContext()
+  activeAudioCtx = audioCtx
+  const arrayBuffer = await blob.arrayBuffer()
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+
+  const source = audioCtx.createBufferSource()
+  activeSource = source
+  source.buffer = audioBuffer
+
+  const analyser = audioCtx.createAnalyser()
+  analyser.fftSize = 256
+  source.connect(analyser)
+  analyser.connect(audioCtx.destination)
+
+  const dataArray = new Uint8Array(analyser.frequencyBinCount)
+  let animId = 0
+
+  const animate = () => {
+    if (runId !== currentRunId) return
+    analyser.getByteTimeDomainData(dataArray)
+
+    let sum = 0
+    for (let i = 0; i < dataArray.length; i++) {
+      const v = (dataArray[i] - 128) / 128
+      sum += v * v
+    }
+    const rms = Math.sqrt(sum / dataArray.length)
+    sprite?.setParameterValueById('ParamMouthOpenY', Math.min(rms * 3, 2.0))
+
+    animId = requestAnimationFrame(animate)
+  }
+
+  source.start()
+  animate()
+
+  await new Promise<void>((resolve) => {
+    source.onended = () => {
+      cancelAnimationFrame(animId)
+      resolve()
+    }
+  })
+
+  sprite?.setParameterValueById('ParamMouthOpenY', 0)
+  audioCtx.close()
+  activeSource = null
+  activeAudioCtx = null
 }
 
 function stopVoice() {
   currentRunId++
-  sprite?.stopVoice()
+  try { activeSource?.stop() } catch {}
+  try { activeAudioCtx?.close() } catch {}
+  sprite?.setParameterValueById('ParamMouthOpenY', 0)
   stopFallbackAudio()
   isSpeaking.value = false
 }
