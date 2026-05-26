@@ -18,19 +18,22 @@ let fallbackAudio: HTMLAudioElement | null = null
 
 onMounted(async () => {
   await nextTick()
+  console.log('[Live2D] mount start, wrapper size:', wrapperRef.value?.clientWidth, 'x', wrapperRef.value?.clientHeight)
 
   const timeout = setTimeout(() => {
     if (!loaded.value) {
-      console.warn('Live2D model load timeout, using CSS fallback')
+      console.warn('[Live2D] model load timeout (10s), using CSS fallback')
       webglFailed.value = true
     }
   }, 10000)
 
   try {
+    console.log('[Live2D] setting Config...')
     Config.MotionGroupIdle = 'Idle'
     Config.MouseFollow = false
     Config.CubismLoggingLevel = LogLevel.LogLevel_Error
 
+    console.log('[Live2D] creating Pixi Application...')
     app = new Application()
     await app.init({
       canvas: canvasRef.value!,
@@ -40,7 +43,9 @@ onMounted(async () => {
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       resizeTo: wrapperRef.value!,
     })
+    console.log('[Live2D] Pixi app init done, canvas:', canvasRef.value?.clientWidth, 'x', canvasRef.value?.clientHeight)
 
+    console.log('[Live2D] creating Live2DSprite...')
     sprite = new Live2DSprite({
       modelPath: '/Resources/Hiyori/Hiyori.model3.json',
       ticker: Ticker.shared,
@@ -50,12 +55,14 @@ onMounted(async () => {
     sprite.x = canvasRef.value!.clientWidth / 2
     sprite.y = canvasRef.value!.clientHeight
     sprite.width = canvasRef.value!.clientWidth * 1.2
+    console.log('[Live2D] sprite created, waiting for ready...')
 
     app.stage.addChild(sprite)
 
     sprite.onLive2D('ready', () => {
       clearTimeout(timeout)
       loaded.value = true
+      console.log('[Live2D] MODEL READY!')
       sprite?.startRandomMotion({ group: 'Idle', priority: Priority.Idle })
     })
 
@@ -66,7 +73,7 @@ onMounted(async () => {
     })
   } catch (e) {
     clearTimeout(timeout)
-    console.warn('Live2D init failed, using CSS fallback', e)
+    console.warn('[Live2D] init failed, using CSS fallback:', e)
     webglFailed.value = true
   }
 })
@@ -142,6 +149,7 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
 
     <div v-if="!loaded && !webglFailed" class="live2d-loading">
       <span class="dot-pulse"></span>
+      <span class="debug-label">Live2D 加载中...</span>
     </div>
 
     <div v-if="webglFailed" class="fallback-avatar">
@@ -156,6 +164,10 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
           <i></i><i></i><i></i><i></i><i></i>
         </div>
       </div>
+    </div>
+
+    <div v-if="!loaded && !webglFailed" class="debug-status">
+      (debug: loaded={{ loaded }}, webglFailed={{ webglFailed }})
     </div>
   </div>
 </template>
