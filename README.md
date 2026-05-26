@@ -141,6 +141,14 @@ docker-compose up -d
 
 ## 更新日志
 
+### 2026-05-27-V5
+
+- **Live2D 数字人（Hiyori）成功接入并正常渲染** — 模型路径统一为 `/Resources/Hiyori/`（对齐 Knowledge_Agent 工程），Pixi.js + easy-live2d 初始化流程参照官方 Vue3 示例重写，去掉多余的 anchor/xy 手动定位
+- **手动 Web Audio API 驱动口型同步** — 放弃 easy-live2d 内置 lip sync（v0.4.4 疑似有 bug），改为原生 `AudioContext.decodeAudioData()` → `AnalyserNode` 实时 RMS 振幅 → `RequestAnimationFrame` 每帧 `setParameterValueById('ParamMouthOpenY')`，口型随 TTS 音频平滑开合
+- **Core SDK 来源修正** — `live2dcubismcore.min.js` 从 Knowledge_Agent 仓库拉取（SHA: `d225300e`，207KB），替换此前 npm 包 `live2dcubismcore` 第三方重打包版本
+- **降级策略完善** — WebGL 不可用时回退 CSS 绿色圆形；Live2D 模型加载 10 秒超时自动降级；`stopVoice()` 可即时停止 Web Audio 源并复位口型
+- **`start.bat` 端口统一** — 后端端口改为 8001，与 `vite.config.ts` 代理目标对齐
+
 ### 2026-05-27-V4
 
 - **修复 text_utils 数字转中文越界 BUG** — `_small_number_to_cn()` 在处理超过 4 位数字段时索引越界导致 RAG 服务崩溃；新增长度守卫，超长数字直接逐位映射，避免 IndexError

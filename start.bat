@@ -17,7 +17,7 @@ if %errorlevel% neq 0 (
 
 :: 启动后端 (新窗口)
 echo [1/3] 启动后端服务 (uvicorn)...
-start "后端服务" cmd /c "conda activate aiman && cd /d "%~dp0backend" && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+start "后端服务" cmd /c "conda activate aiman && cd /d "%~dp0backend" && uvicorn app.main:app --reload --host 0.0.0.0 --port 8001"
 
 :: 等待后端准备
 timeout /t 3 /nobreak >nul
@@ -35,7 +35,7 @@ echo 所有服务已启动！
 echo.
 echo  游客前端: http://localhost:5173
 echo  管理后台: http://localhost:5174
-echo  后端 API: http://localhost:8000
+echo  后端 API: http://localhost:8001
 echo.
 echo 关闭窗口即可停止对应服务。
 echo.

@@ -186,7 +186,6 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
 
     <div v-if="!loaded && !webglFailed" class="live2d-loading">
       <span class="dot-pulse"></span>
-      <span class="debug-label">Live2D 加载中...</span>
     </div>
 
     <div v-if="webglFailed" class="fallback-avatar">
@@ -201,10 +200,6 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
           <i></i><i></i><i></i><i></i><i></i>
         </div>
       </div>
-    </div>
-
-    <div class="debug-status">
-      loaded={{ loaded }} webglFailed={{ webglFailed }} w={{ wrapperRef?.clientWidth }}x{{ wrapperRef?.clientHeight }} c={{ canvasRef?.clientWidth }}x{{ canvasRef?.clientHeight }}
     </div>
   </div>
 </template>
@@ -228,10 +223,8 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
   position: absolute;
   inset: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
 }
 
 .dot-pulse {
@@ -240,24 +233,6 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
   border-radius: 50%;
   background: #6f9b72;
   animation: dotPulse 1.2s ease-in-out infinite;
-}
-
-.debug-label {
-  font-size: 12px;
-  color: #888;
-}
-
-.debug-status {
-  position: absolute;
-  bottom: 4px;
-  left: 4px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #0f0;
-  font-size: 10px;
-  font-family: monospace;
-  z-index: 10;
 }
 
 @keyframes dotPulse {
