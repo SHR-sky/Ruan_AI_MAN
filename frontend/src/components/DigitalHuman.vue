@@ -166,8 +166,8 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
       </div>
     </div>
 
-    <div v-if="!loaded && !webglFailed" class="debug-status">
-      (debug: loaded={{ loaded }}, webglFailed={{ webglFailed }})
+    <div class="debug-status">
+      loaded={{ loaded }} webglFailed={{ webglFailed }} wrapper={{ wrapperRef?.clientWidth }}x{{ wrapperRef?.clientHeight }} canvas={{ canvasRef?.clientWidth }}x{{ canvasRef?.clientHeight }}
     </div>
   </div>
 </template>
@@ -188,14 +188,36 @@ defineExpose({ playVoice, stopVoice, isSpeaking, triggerExpression })
   width: 100%;
   height: 100%;
   display: block;
+  background: rgba(255, 0, 0, 0.05);
 }
 
 .live2d-loading {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+}
+
+.debug-label {
+  font-size: 12px;
+  color: #888;
+}
+
+.debug-status {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #0f0;
+  font-size: 10px;
+  font-family: monospace;
+  z-index: 10;
+  white-space: nowrap;
 }
 
 .dot-pulse {
