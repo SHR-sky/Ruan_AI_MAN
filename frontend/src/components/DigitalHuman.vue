@@ -47,7 +47,10 @@ onMounted(async () => {
       ticker: Ticker.shared,
     })
 
-    sprite.width = canvasRef.value.clientWidth
+    sprite.anchor.set(0.5, 1)
+    sprite.x = canvasRef.value.clientWidth / 2
+    sprite.y = canvasRef.value.clientHeight
+    sprite.width = canvasRef.value.clientWidth * 1.2
     app.stage.addChild(sprite)
 
     sprite.onLive2D('ready', () => {
@@ -59,7 +62,11 @@ onMounted(async () => {
     if (wrapperRef.value) {
       resizeObserver = new ResizeObserver(() => {
         if (sprite && canvasRef.value) {
-          sprite.width = canvasRef.value.clientWidth
+          const w = canvasRef.value.clientWidth
+          const h = canvasRef.value.clientHeight
+          sprite.width = w * 1.2
+          sprite.x = w / 2
+          sprite.y = h
         }
       })
       resizeObserver.observe(wrapperRef.value)
