@@ -14,7 +14,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 class TTSService:
     _engine = KokoroTTSEngine()
-    _cache_version = "kokoro_zh_v1"
+    _cache_version = "kokoro_zh_v2"
 
     def __init__(self):
         upload_dir = Path(settings.UPLOAD_DIR)

@@ -23,8 +23,11 @@ class KokoroTTSEngine:
     repo_id = "hexgrad/Kokoro-82M"
     language_code = "z"
     sample_rate = 24000
-    max_chunk_chars = 180
+    max_chunk_chars = 60
+    max_phoneme_length = 320
     chunk_pause_seconds = 0.015
+    min_seconds_per_spoken_char = 0.06
+    max_retry_split_depth = 3
 
     voice_map = {
         "default": "zf_xiaoxiao",
@@ -39,6 +42,7 @@ class KokoroTTSEngine:
     _load_lock = threading.Lock()
     _synthesis_lock = asyncio.Lock()
     _load_error = None
+    _phoneme_length_cache: dict[str, int] = {}
 
     @property
     def pipeline(self):
@@ -101,57 +105,71 @@ class KokoroTTSEngine:
         normalized = re.sub(r"\s+", " ", text).strip()
         if not normalized:
             return []
+        atoms = self._build_atoms(normalized)
+        return self._pack_atoms(atoms)
 
+    def _build_atoms(self, text: str) -> list[str]:
+        strong_parts = re.findall(r"[^。！？!?；;\n]+[。！？!?；;\n]?", text) or [text]
+        atoms: list[str] = []
+        for part in strong_parts:
+            part = part.strip()
+            if not part:
+                continue
+            if len(part) <= self.max_chunk_chars and self._phoneme_length(part) <= self.max_phoneme_length:
+                atoms.append(part)
+                continue
+            weak_parts = re.findall(r"[^，,、：:（）()]+[，,、：:（）()]?", part) or [part]
+            for weak_part in weak_parts:
+                weak_part = weak_part.strip()
+                if not weak_part:
+                    continue
+                if len(weak_part) <= self.max_chunk_chars and self._phoneme_length(weak_part) <= self.max_phoneme_length:
+                    atoms.append(weak_part)
+                    continue
+                atoms.extend(self._hard_split(weak_part))
+        return atoms
+
+    def _hard_split(self, text: str) -> list[str]:
+        step = max(24, self.max_chunk_chars // 2)
+        return [text[start:start + step].strip() for start in range(0, len(text), step) if text[start:start + step].strip()]
+
+    def _resplit_chunk(self, text: str) -> list[str]:
+        parts = re.findall(r"[^，,、：:；;]+[，,、：:；;]?", text) or [text]
+        cleaned = [part.strip() for part in parts if part.strip()]
+        if len(cleaned) > 1:
+            return cleaned
+        step = max(16, min(28, len(text) // 2 or 16))
+        return [text[start:start + step].strip() for start in range(0, len(text), step) if text[start:start + step].strip()]
+
+    def _pack_atoms(self, atoms: list[str]) -> list[str]:
         chunks: list[str] = []
         current = ""
-        pieces = re.findall(r"[^。！？!?；;\n]+[。！？!?；;\n]?", normalized)
-        for piece in pieces or [normalized]:
-            piece = piece.strip()
-            if not piece:
+        for atom in atoms:
+            candidate = f"{current}{atom}" if current else atom
+            if self._is_chunk_safe(candidate):
+                current = candidate
                 continue
-            if len(piece) > self.max_chunk_chars:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                chunks.extend(self._split_long_piece(piece))
-                continue
-            if current and len(current) + len(piece) > self.max_chunk_chars:
+            if current:
                 chunks.append(current)
-                current = piece
-            else:
-                current += piece
+            current = atom
         if current:
             chunks.append(current)
         return chunks
 
-    def _split_long_piece(self, text: str) -> list[str]:
-        chunks: list[str] = []
-        current = ""
-        parts: list[str] = []
-        buffer = ""
-        for char in text:
-            buffer += char
-            if char in "，,、：:":
-                parts.append(buffer)
-                buffer = ""
-        if buffer:
-            parts.append(buffer)
+    def _is_chunk_safe(self, text: str) -> bool:
+        return len(text) <= self.max_chunk_chars and self._phoneme_length(text) <= self.max_phoneme_length
 
-        for part in parts:
-            if len(part) > self.max_chunk_chars:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                for start in range(0, len(part), self.max_chunk_chars):
-                    chunks.append(part[start:start + self.max_chunk_chars])
-            elif current and len(current) + len(part) > self.max_chunk_chars:
-                chunks.append(current)
-                current = part
-            else:
-                current += part
-        if current:
-            chunks.append(current)
-        return [chunk for chunk in chunks if chunk.strip()]
+    def _phoneme_length(self, text: str) -> int:
+        cached = self.__class__._phoneme_length_cache.get(text)
+        if cached is not None:
+            return cached
+        try:
+            phonemes, _ = self.pipeline.g2p(text)
+            length = len(phonemes or "")
+        except Exception:
+            length = len(text) * 3
+        self.__class__._phoneme_length_cache[text] = length
+        return length
 
     def _synthesize_chunk_sync(self, text: str, voice: str) -> np.ndarray:
         generator = self.pipeline(text, voice=voice, speed=1, split_pattern=r"\n+")
@@ -170,6 +188,35 @@ class KokoroTTSEngine:
         async with self.__class__._synthesis_lock:
             return await asyncio.to_thread(self._synthesize_chunk_sync, text, voice)
 
+    def _should_retry_chunk(self, text: str, audio: np.ndarray) -> bool:
+        spoken_chars = len(re.sub(r"[\s，。！？；：、“”\"'‘’（）()《》【】\[\]]", "", text))
+        if spoken_chars <= 12:
+            return False
+        duration = float(audio.size) / float(self.sample_rate) if audio.size else 0.0
+        return duration < max(1.2, spoken_chars * self.min_seconds_per_spoken_char)
+
+    async def _synthesize_chunk_with_retry(self, text: str, voice: str, depth: int = 0) -> np.ndarray:
+        audio = await self._synthesize_chunk(text, voice)
+        if depth >= self.max_retry_split_depth or not self._should_retry_chunk(text, audio):
+            return audio
+
+        sub_chunks = self._resplit_chunk(text)
+        if len(sub_chunks) <= 1:
+            return audio
+
+        pause = np.zeros(int(self.sample_rate * self.chunk_pause_seconds), dtype=np.float32)
+        segments: list[np.ndarray] = []
+        for index, sub_chunk in enumerate(sub_chunks):
+            sub_audio = await self._synthesize_chunk_with_retry(sub_chunk, voice, depth + 1)
+            if sub_audio.size:
+                segments.append(sub_audio)
+                if index < len(sub_chunks) - 1:
+                    segments.append(pause)
+
+        if not segments:
+            return audio
+        return np.concatenate(segments)
+
     def _to_wav(self, audio: np.ndarray) -> bytes:
         buffer = io.BytesIO()
         sf.write(buffer, audio, self.sample_rate, format="WAV")
@@ -184,7 +231,7 @@ class KokoroTTSEngine:
         pause = np.zeros(int(self.sample_rate * self.chunk_pause_seconds), dtype=np.float32)
         segments: list[np.ndarray] = []
         for index, chunk in enumerate(chunks):
-            audio = await self._synthesize_chunk(chunk, voice)
+            audio = await self._synthesize_chunk_with_retry(chunk, voice)
             if audio.size:
                 segments.append(audio)
                 if index < len(chunks) - 1:
@@ -197,7 +244,7 @@ class KokoroTTSEngine:
     async def synthesize_stream(self, text: str, voice_type: Optional[str] = None):
         voice = self.resolve_voice(voice_type)
         for chunk in self._split_chunks(text):
-            audio = await self._synthesize_chunk(chunk, voice)
+            audio = await self._synthesize_chunk_with_retry(chunk, voice)
             yield {
                 "audio": self._to_wav(audio),
                 "timestamps": [],

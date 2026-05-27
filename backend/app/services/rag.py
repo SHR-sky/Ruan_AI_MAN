@@ -11,11 +11,66 @@ KB_DIR = BASE_DIR / "data" / "knowledge_base"
 
 
 class RAGService:
+    max_answer_chars = 120
+    max_answer_sentences = 3
+
     def __init__(self):
         self.knowledge_items = []
         self.faqs = []
         self.uploaded_docs = {}
         self._loaded = False
+
+    def _to_plain_text(self, text: str) -> str:
+        text = text.replace("\r\n", "\n")
+        text = re.sub(r"```.*?```", " ", text, flags=re.S)
+        text = re.sub(r"`([^`]*)`", r"\1", text)
+        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        text = re.sub(r"https?://\S+", " ", text)
+        text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.M)
+        text = re.sub(r"^\s*[*\-+•]\s+", "", text, flags=re.M)
+        text = text.replace("**", "").replace("__", "")
+        text = re.sub(r"(?<!\*)\*(?!\*)", "", text)
+        text = re.sub(r"(?<!_)_(?!_)", "", text)
+        text = text.replace("|", "，")
+        text = re.sub(r"\n+", " ", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"([。！？；，、：]){2,}", r"\1", text)
+        return text.strip(" ，。；;:：")
+
+    def _clamp_plain_answer(self, text: str, char_limit: Optional[int] = None) -> str:
+        limit = char_limit or self.max_answer_chars
+        plain = self._to_plain_text(text)
+        if not plain:
+            return "抱歉，我暂时没有整理出合适的介绍。"
+
+        sentence_parts = re.split(r"(?<=[。！？!?])", plain)
+        kept = []
+        total = 0
+        for part in sentence_parts:
+            part = part.strip()
+            if not part:
+                continue
+            if len(kept) >= self.max_answer_sentences:
+                break
+            if total + len(part) > limit and kept:
+                break
+            if len(part) > limit and not kept:
+                trimmed = part[:limit].rstrip("，、；;：: ")
+                kept.append(trimmed + ("。" if trimmed and trimmed[-1] not in "。！？!?" else ""))
+                break
+            kept.append(part)
+            total += len(part)
+
+        if not kept:
+            trimmed = plain[:limit].rstrip("，、；;：: ")
+            return trimmed + ("。" if trimmed and trimmed[-1] not in "。！？!?" else "")
+
+        answer = "".join(kept)
+        if len(answer) > limit:
+            answer = answer[:limit].rstrip("，、；;：: ")
+        if answer and answer[-1] not in "。！？!?":
+            answer += "。"
+        return answer
 
     def _ensure_loaded(self):
         if self._loaded:
@@ -161,22 +216,29 @@ class RAGService:
                 {
                     "role": "system",
                     "content": (
-                        "你是一个景区导览AI助手。请根据以下参考资料，用简洁自然的口吻回答游客的问题。"
-                        "要求：1）用自己的话总结，不要直接复制原文；"
-                        "2）控制在200字以内；"
-                        "3）回答要友好热情，像导游在介绍。"
+                        "你是一个景区导览AI助手。请严格根据参考资料回答，不要补充资料里没有的事实。"
+                        "输出要求："
+                        "1）只能输出纯文本，禁止使用 Markdown、标题、序号、项目符号、星号、加粗、表格；"
+                        "2）用自己的话概括，像景区导游口播，不要大段照抄原文；"
+                        "3）控制在3句以内、120字以内，优先回答最重要的信息；"
+                        "4）如果资料不足，直接明确说暂时没有足够信息。"
                     ),
                 },
                 {
                     "role": "user",
-                    "content": f"参考资料：\n{context}\n\n游客问：{query}\n\n请回答：",
+                        "content": f"参考资料：\n{context}\n\n游客问：{query}\n\n请回答：",
                 },
             ]
         else:
             messages = [
                 {
                     "role": "system",
-                    "content": "你是一个景区导览AI助手。游客的问题超出你的知识范围，请礼貌告知暂时没有相关信息，并建议游客咨询游客中心或换个问题试试。",
+                    "content": (
+                        "你是一个景区导览AI助手。"
+                        "如果游客的问题超出知识范围，只能输出简短纯文本。"
+                        "禁止使用 Markdown、列表或长段说明。"
+                        "请在2句以内礼貌告知暂时没有相关信息，并建议游客换个问法或咨询游客中心。"
+                    ),
                 },
                 {
                     "role": "user",
@@ -185,14 +247,15 @@ class RAGService:
             ]
 
         try:
-            response = await llm.chat(messages)
-            return response["content"]
+            response = await llm.chat(messages, max_tokens=192, temperature=0.35)
+            return self._clamp_plain_answer(response["content"])
         except Exception as exc:
             print(f"[RAG] LLM generate failed: {exc}")
             if results:
-                return results[0]["content"][:300]
-            return (f"关于「{query}」，我暂时没有找到准确的资料。"
-                    f"请尝试换一个问法，或者前往景区游客中心咨询。")
+                return self._clamp_plain_answer(results[0]["content"])
+            return self._clamp_plain_answer(
+                f"关于{query}，我暂时没有找到准确资料。请换个问法，或者前往景区游客中心咨询。"
+            )
 
     async def search(self, query: str, top_k: int = 5) -> list:
         self._ensure_loaded()

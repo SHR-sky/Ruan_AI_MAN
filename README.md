@@ -141,6 +141,16 @@ docker-compose up -d
 
 ## 更新日志
 
+### 2026-05-27-V7
+
+- **Kokoro TTS 稳定性修复** — 语音合成分段策略改为更保守的 60 字 / 320 音素上限，避免长句在单段内被模型截断或吞字
+- **异常短音频自动重试** — 新增 TTS 二次拆分重合成机制，当某段音频时长明显短于文本长度时自动继续拆小，降低“念到一半跳后文”的问题
+- **TTS 文本清洗增强** — 朗读前统一去除 Markdown、项目符号、链接和多余格式，并把标题/列表转换为更自然的口播句子边界
+- **TTS 缓存版本升级** — 升级为 `kokoro_zh_v2`，避免继续命中旧的错误缓存音频
+- **LLM 输出改为纯文本短回答** — RAG 系统提示词明确禁止 Markdown、列表、表格和大段照抄，统一限制为 3 句以内、120 字以内
+- **服务端回答兜底裁剪** — 即使模型偶发输出格式化文本，后端也会再次清洗并裁剪为纯文本，保证网页端、语音端和后续 ESP32 接口输出一致
+- **本地推理参数收紧** — `llama-cpp` 生成参数调整为更短、更稳的配置，减少跑题、冗长和格式漂移
+
 ### 2026-05-27-V6
 
 - **Live2D 响应式定位** — 添加 `ResizeObserver` 监听容器尺寸变化，同步更新 sprite 的 `x`（居中）、`y`（底部偏移）、`width`（宽度填充），确保切换设备和窗口缩放时模型位置比例不变
@@ -149,7 +159,7 @@ docker-compose up -d
 
 ### 2026-05-27-V5
 
-- **Live2D 数字人（Hiyori）成功接入并正常渲染** — 模型路径统一为 `/Resources/Hiyori/`（对齐 Knowledge_Agent 工程），Pixi.js + easy-live2d 初始化流程参照官方 Vue3 示例重写，去掉多余的 anchor/xy 手动定位
+- **Live2D 数字人（Hiyori）成功接入并正常渲染** — 模型路径统一为 `/Resources/Hiyori/`，Pixi.js + easy-live2d 初始化流程参照官方 Vue3 示例重写，去掉多余的 anchor/xy 手动定位
 - **手动 Web Audio API 驱动口型同步** — 放弃 easy-live2d 内置 lip sync（v0.4.4 疑似有 bug），改为原生 `AudioContext.decodeAudioData()` → `AnalyserNode` 实时 RMS 振幅 → `RequestAnimationFrame` 每帧 `setParameterValueById('ParamMouthOpenY')`，口型随 TTS 音频平滑开合
 - **Core SDK 来源修正** — `live2dcubismcore.min.js` 从 Knowledge_Agent 仓库拉取（SHA: `d225300e`，207KB），替换此前 npm 包 `live2dcubismcore` 第三方重打包版本
 - **降级策略完善** — WebGL 不可用时回退 CSS 绿色圆形；Live2D 模型加载 10 秒超时自动降级；`stopVoice()` 可即时停止 Web Audio 源并复位口型

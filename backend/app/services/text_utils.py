@@ -9,6 +9,29 @@ _UNIT_MAP = ["", "十", "百", "千"]
 _BIG_UNIT_MAP = ["", "万", "亿", "万亿"]
 
 
+def normalize_tts_text(text: str) -> str:
+    """Convert markdown-ish answer text into plain spoken Chinese."""
+    text = text.replace("\r\n", "\n")
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"https?://\S+", " ", text)
+    # Force headings and list items onto new spoken sentences.
+    text = re.sub(r"\n(?=\s*(?:[*\-+•]\s+|#{1,6}\s*))", "。\n", text)
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.M)
+    text = re.sub(r"^\s*[*\-+•]\s+", "", text, flags=re.M)
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"(?<!\*)\*(?!\*)", "", text)
+    text = re.sub(r"(?<!_)_(?!_)", "", text)
+    text = text.replace("|", "，")
+    text = re.sub(r"\n{2,}", "。", text)
+    text = re.sub(r"\n", "，", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"([。！？；，、：]){2,}", r"\1", text)
+    text = re.sub(r"([：])([。！？])", r"\2", text)
+    return text.strip(" ，。")
+
+
 def _small_number_to_cn(num_str: str) -> str:
     if num_str == "0":
         return "零"
@@ -44,12 +67,13 @@ def number_to_chinese(text: str) -> str:
 
 def preprocess_text(text: str) -> str:
     """TTS 文本预处理"""
+    text = normalize_tts_text(text)
     text = number_to_chinese(text)
     text = text.replace("%", "百分之")
     text = text.replace("℃", "度")
     text = text.replace("km", "公里")
-    text = text.replace("m", "米")
     text = text.replace("cm", "厘米")
+    text = text.replace("m", "米")
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
