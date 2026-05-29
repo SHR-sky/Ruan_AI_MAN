@@ -141,6 +141,20 @@ docker-compose up -d
 
 ## 更新日志
 
+### 2026-05-29-V8
+
+- **Live2D 模型更换为 Mao** — 从 Hiyori 切换为 Mao 模型（`/Resources/Mao/Mao.model3.json`），更新模型配置路径
+- **数字人场景舞台重构** — 新增 `scene-stage` 舞台容器，包含网格背景（`scene-grid`）、聚光灯（`scene-spotlight`）、拱门（`scene-arch`）、平台圆环（`scene-platform`）和前景渐变（`scene-foreground`），打造沉浸式展示场景
+- **响应式舞台布局** — 新增 `updateSceneLayout()` 函数，基于 `STAGE_ASPECT`（0.76）和 `MODEL_PROFILE` 配置动态计算舞台尺寸与模型位置，适配不同容器比例
+- **模型宽高比自适应** — 通过 `getModelCanvasSize()` 获取模型原始宽高比，结合 `fitHeight`（0.96）和 `maxWidth`（0.7）约束，确保模型在舞台中正确缩放
+- **口型同步参数扩展** — `setLipSyncValue()` 同时设置 `ParamMouthOpenY` 和 `ParamA` 两个参数，提升口型动画兼容性
+- **表情切换安全检查** — `triggerExpression()` 先验证表达式是否存在，不存在时自动回退到随机表情
+- **舞台状态指示器** — 新增左上角 `scene-status` 浮层，实时显示"数字人待命"或"语音讲解中"状态，播放时边框变色提示
+- **降级头像重设计** — WebGL 不可用时显示人形剪影（头+身体）替代旧版绿色圆形，视觉风格与舞台场景统一
+- **Chat 页面布局优化** — 左侧面板增加 `scene-topline`（标签+状态徽章），`guide-card` 改为绝对定位悬浮于舞台底部，描述文本支持滚动（`max-height: 8.1em`）
+- **左右分栏比例微调** — 从 `0.92fr / 1.08fr` 调整为 `1.02fr / 0.98fr`，数字人区域略宽以适配新舞台设计
+- **移动端适配增强** — 小屏下 `digital-human-area` 最小高度提升至 560px，`scene-topline` 和 `guide-card` 回退为静态定位
+
 ### 2026-05-27-V7
 
 - **Kokoro TTS 稳定性修复** — 语音合成分段策略改为更保守的 60 字 / 320 音素上限，避免长句在单段内被模型截断或吞字

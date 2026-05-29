@@ -184,9 +184,14 @@ function handleVoiceResult(text: string) {
 
     <main class="chat-main">
       <section class="digital-human-area">
-        <DigitalHuman ref="dhRef" :speaking="isPlaying" />
-        <div class="guide-card">
+        <div class="scene-topline">
           <span class="tag">{{ introType || '知识库导览' }}</span>
+          <span class="scene-badge" :class="{ active: isPlaying }">{{ isPlaying ? '语音导览中' : '数字人待命' }}</span>
+        </div>
+        <div class="digital-human-stage">
+          <DigitalHuman ref="dhRef" :speaking="isPlaying" />
+        </div>
+        <div class="guide-card">
           <h2>{{ introName || '正在加载景点' }}</h2>
           <p>{{ introText || '正在从本地知识库生成导览词。' }}</p>
           <div v-if="autoplayBlocked || audioError" class="audio-alert">
@@ -290,9 +295,9 @@ function handleVoiceResult(text: string) {
 .chat-main {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.08fr);
+  grid-template-columns: minmax(400px, 1.02fr) minmax(420px, 0.98fr);
   grid-template-rows: 1fr;
-  gap: 22px;
+  gap: 20px;
   padding: 22px;
   overflow: hidden;
 }
@@ -304,12 +309,14 @@ function handleVoiceResult(text: string) {
 }
 
 .digital-human-area {
-  display: grid;
-  grid-template-rows: 1fr auto;
+  position: relative;
+  padding: 18px;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(255,252,244,0.4) 0%, rgba(255,252,244,0.8) 100%);
-  border: 1px solid rgba(58, 80, 64, 0.1);
-  box-shadow: 0 4px 24px rgba(55, 74, 54, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 252, 244, 0.56) 0%, rgba(255, 252, 244, 0.8) 100%),
+    linear-gradient(135deg, rgba(245, 238, 222, 0.9) 0%, rgba(231, 239, 228, 0.9) 58%, rgba(217, 228, 216, 0.92) 100%);
+  border: 1px solid rgba(58, 80, 64, 0.12);
+  box-shadow: 0 18px 56px rgba(55, 74, 54, 0.12);
 }
 
 .chat-area {
@@ -318,13 +325,56 @@ function handleVoiceResult(text: string) {
   box-shadow: 0 22px 70px rgba(55, 74, 54, 0.14);
 }
 
+.scene-topline {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.scene-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(58, 80, 64, 0.1);
+  color: #526257;
+  font-size: 12px;
+  font-weight: 700;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 28px rgba(43, 59, 47, 0.08);
+}
+
+.scene-badge.active {
+  color: #9d442f;
+  border-color: rgba(182, 70, 50, 0.18);
+  background: rgba(255, 247, 244, 0.88);
+}
+
+.digital-human-stage {
+  height: 100%;
+  min-height: 0;
+}
+
 .guide-card {
-  margin: 0 16px 16px;
-  padding: 14px 18px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.85);
+  position: absolute;
+  left: 30px;
+  bottom: 28px;
+  z-index: 4;
+  width: min(360px, calc(100% - 60px));
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.8);
   border: 1px solid rgba(58, 80, 64, 0.08);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 22px 50px rgba(48, 65, 52, 0.14);
 }
 
 .tag {
@@ -347,6 +397,9 @@ function handleVoiceResult(text: string) {
   color: #526257;
   font-size: 13px;
   line-height: 1.6;
+  max-height: 8.1em;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .audio-alert {
@@ -417,7 +470,20 @@ function handleVoiceResult(text: string) {
   }
 
   .digital-human-area {
-    min-height: 480px;
+    min-height: 560px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .scene-topline,
+  .guide-card {
+    position: static;
+    width: 100%;
+  }
+
+  .digital-human-stage {
+    min-height: 420px;
   }
 }
 </style>
